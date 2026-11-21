@@ -636,7 +636,7 @@
         }
       }
       gctx.lineWidth = 1;
-      gctx.strokeStyle = 'rgba(16,32,54,0.2)';
+      gctx.strokeStyle = 'rgba(16,32,54,0.24)';
       gctx.stroke();
     }
 
@@ -660,11 +660,11 @@
         }
       }
       if (anyRange) {
-        gctx.fillStyle = hexA(C.main, 0.15);
+        gctx.fillStyle = hexA(C.main, 0.17);
         gctx.fill();
         gctx.setLineDash([5, 4]);
         gctx.lineWidth = 1.3;
-        gctx.strokeStyle = hexA(C.main, 0.55);
+        gctx.strokeStyle = hexA(C.main, 0.62);
         gctx.stroke();
         gctx.setLineDash([]);
       }
