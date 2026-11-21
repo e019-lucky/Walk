@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#070b14" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="description" content="걸어서 땅따먹기 — 현실판 Paper.io. GPS로 이동하며 지도 위 내 영역을 넓히는 게임." />
+<title>현실판 Paper.io · 걸어서 땅따먹기</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b1220'/%3E%3Cpath d='M14 40 L26 20 L38 32 L50 18' stroke='%2322d3ee' stroke-width='5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='14' cy='40' r='5' fill='%2367e8f9'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+<link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+  <div id="map"></div>
+
+  <header class="hud hud-top">
+    <div class="chips">
+      <div class="chip">
+        <span class="chip-label">점령 면적</span>
+        <b id="statArea">0 m²</b>
+      </div>
+      <div class="chip">
+        <span class="chip-label">점령 횟수</span>
+        <b id="statCount">0</b>
+      </div>
+    </div>
+    <button id="modeBtn" class="mode-btn" type="button" aria-pressed="false">
+      <span class="dot"></span><span id="modeLabel">GPS 모드</span>
+    </button>
+  </header>
+
+  <div id="accChip" class="acc-chip" hidden>GPS ±<span id="accVal">0</span>m</div>
+
+  <div class="hud hud-bottom-left">
+    <button id="locateBtn" class="round-btn" type="button" aria-label="내 위치">
+      <span aria-hidden="true">◎</span><small>내 위치</small>
+    </button>
+    <button id="resetBtn" class="round-btn" type="button" aria-label="초기화">
+      <span aria-hidden="true">↺</span><small>초기화</small>
+    </button>
+  </div>
+
+  <div id="dpad" class="dpad" hidden>
+    <button class="pad-btn" type="button" data-dx="-1" data-dy="1" aria-label="왼쪽 위">↖</button>
+    <button class="pad-btn" type="button" data-dx="0" data-dy="1" aria-label="위">↑</button>
+    <button class="pad-btn" type="button" data-dx="1" data-dy="1" aria-label="오른쪽 위">↗</button>
+    <button class="pad-btn" type="button" data-dx="-1" data-dy="0" aria-label="왼쪽">←</button>
+    <button id="padStop" class="pad-btn pad-center" type="button" aria-label="멈추기">●</button>
+    <button class="pad-btn" type="button" data-dx="1" data-dy="0" aria-label="오른쪽">→</button>
+    <button class="pad-btn" type="button" data-dx="-1" data-dy="-1" aria-label="왼쪽 아래">↙</button>
+    <button class="pad-btn" type="button" data-dx="0" data-dy="-1" aria-label="아래">↓</button>
+    <button class="pad-btn" type="button" data-dx="1" data-dy="-1" aria-label="오른쪽 아래">↘</button>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="celebrate" class="celebrate" aria-hidden="true"></div>
+
+  <div id="helpSheet" class="sheet" hidden>
+    <div class="sheet-card">
+      <div class="badge">REAL PAPER.IO</div>
+      <h1>걸어서 땅따먹기</h1>
+      <p class="lead">지도 위를 걸으며 내 영역을 넓히는 게임</p>
+      <ol class="steps">
+        <li><b>영역 밖으로</b> 나가면 이동 궤적이 그려집니다.</li>
+        <li>다시 <b>내 영역 안으로</b> 들어오면 그 사이가 내 땅이 됩니다.</li>
+        <li>실내에서는 <b>테스트 패드</b>로 지도를 눌러 이동해 보세요.</li>
+      </ol>
+      <button id="helpClose" class="primary-btn" type="button">시작하기</button>
+      <p class="fine">위치는 이 기기 안에서만 쓰이고 서버로 보내지 않습니다. 점령한 영역은 이 브라우저에 저장됩니다.</p>
+    </div>
+  </div>
+
+  <div id="resetSheet" class="sheet" hidden>
+    <div class="sheet-card">
+      <h2>처음부터 다시 시작할까요?</h2>
+      <p class="lead">지금 위치에 새 기지(반경 35m)를 만들고 점령 면적과 횟수를 0으로 되돌립니다.</p>
+      <div class="row">
+        <button id="resetCancel" class="ghost-btn" type="button">취소</button>
+        <button id="resetConfirm" class="primary-btn danger" type="button">초기화</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="https://unpkg.com/@turf/turf@7.0.0/turf.min.js" crossorigin=""></script>
+  <script src="assets/app.js"></script>
+</body>
+</html>
