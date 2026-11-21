@@ -479,12 +479,12 @@
 
     var W = size.x;
     var H = size.y;
-    // 화면을 덮는 칸 인덱스 범위 (dx = ix - cx, dy = iy - cy)
+    // 화면을 덮는 칸 인덱스 범위 (절대 인덱스)
     // base = 중심 칸의 남서(왼쪽 아래) 모서리. 화면 y는 위로 갈수록 작아진다.
-    var dxFrom = Math.floor(-base.x / cw) - 1;
-    var dxTo = Math.ceil((W - base.x) / cw) + 1;
-    var dyTo = Math.ceil(-base.y / ch) + 1;
-    var dyFrom = Math.floor((H - base.y) / ch) - 1;
+    var dxFrom = cc.ix + Math.floor(-base.x / cw) - 1;
+    var dxTo = cc.ix + Math.ceil((W - base.x) / cw) + 1;
+    var dyTo = cc.iy + Math.ceil(-base.y / ch) + 1;
+    var dyFrom = cc.iy + Math.floor((H - base.y) / ch) - 1;
     if (!(dxTo >= dxFrom) || !(dyTo >= dyFrom)) return null;
 
     return {
