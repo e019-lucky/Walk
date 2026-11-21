@@ -892,12 +892,10 @@
     var start = S.home || (S.territory ? centroidOf(S.territory) : DEFAULT_CENTER);
     map.setView([start.lat, start.lng], ZOOM_DEFAULT);
 
-    Lmap.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-      subdomains: 'abcd',
-      maxZoom: 20,
-      detectRetina: true,
+    Lmap.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
       attribution:
-        '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>'
+        '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>'
     }).addTo(map);
 
     Lmap.control.attribution({ position: 'bottomleft', prefix: false }).addTo(map);
