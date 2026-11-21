@@ -548,7 +548,26 @@
     }
   }
 
+  function pxCount() {
+    try {
+      var d = gctx.getImageData(0, 0, 480, 480).data;
+      var n = 0;
+      for (var i = 3; i < d.length; i += 4) if (d[i] > 4) n++;
+      return n;
+    } catch (e) {
+      return 'e:' + e.message;
+    }
+  }
+
   function drawGrid() {
+    try {
+      drawGridInner();
+    } catch (e) {
+      if (DBG) dbgShow({ error: String((e && e.message) || e), stack: String((e && e.stack) || '').slice(0, 300) });
+    }
+  }
+
+  function drawGridInner() {
     if (!gctx || !map) return;
     var size = map.getSize();
     if (!size || !size.x) return;
@@ -585,6 +604,7 @@
     var rangeSq = rangeMerc * rangeMerc;
 
     var i, ix, iy, key, dx, dy, left, top, mx, my, ddx, ddy;
+    var rectsDrawn = 0;
 
     // 1) 칸 격자선 (빈 칸)
     if (showGrid) {
@@ -598,6 +618,7 @@
           left = v.base.x + dx * cw;
           top = v.base.y + (dy + 1) * v.ch;
           gctx.rect(left + 0.5, top + 0.5, cw - 1, chAbs - 1);
+          rectsDrawn++;
         }
       }
       gctx.lineWidth = 1;
@@ -687,6 +708,14 @@
     gctx.strokeStyle = hexA(C.main, 0.35);
     gctx.stroke();
     gctx.setLineDash([]);
+
+    if (DBG) {
+      dbgShow({
+        sg: showGrid, sr: showRange, rects: rectsDrawn, px: pxCount(), n: v.count,
+        cw: +v.cw.toFixed(2), dx: [v.dxFrom, v.dxTo], dy: [v.dyFrom, v.dyTo],
+        bx: Math.round(v.base.x), by: Math.round(v.base.y), w: W, h: H
+      });
+    }
   }
 
   function drawFx(now) {
@@ -1302,12 +1331,15 @@
     load();
     initMap();
     if (/(^|[?&])debug=1/.test(location.search)) {
-      window.pb = DBG = {
+      window.pbDbg = DBG = {
         S: S,
         view: computeView,
         draw: drawGrid,
         map: function () {
           return map;
+        },
+        canvas: function () {
+          return gcanvas;
         }
       };
     }
