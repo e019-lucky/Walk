@@ -9,7 +9,10 @@
 <meta name="description" content="걸어서 땅따먹기 — 현실판 Paper.io. GPS로 이동하며 지도 위 내 영역을 넓히는 게임." />
 <title>현실판 Paper.io · 걸어서 땅따먹기</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b1220'/%3E%3Cpath d='M14 40 L26 20 L38 32 L50 18' stroke='%2322d3ee' stroke-width='5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='14' cy='40' r='5' fill='%2367e8f9'/%3E%3C/svg%3E" />
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""
+  onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css'" />
+<link rel="preconnect" href="https://unpkg.com" crossorigin="" />
+<link rel="preconnect" href="https://basemaps.cartocdn.com" crossorigin="" />
 <link rel="stylesheet" href="assets/style.css" />
 </head>
 <body>
@@ -84,7 +87,18 @@
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script>
+    /* CDN 장애 대비 대체 로더 (파싱 중 동기 삽입) */
+    if (!window.L) {
+      document.write('<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"><\/script>');
+    }
+  </script>
   <script src="https://unpkg.com/@turf/turf@7.0.0/turf.min.js" crossorigin=""></script>
+  <script>
+    if (!window.turf) {
+      document.write('<script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.0.0/turf.min.js"><\/script>');
+    }
+  </script>
   <script src="assets/app.js"></script>
 </body>
 </html>
