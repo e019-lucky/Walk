@@ -37,7 +37,7 @@
   var WALK_SPEED = 9; // m/s (탭 이동)
   var DEFAULT_ZOOM = 16;
   var DEFAULT_CENTER = { lat: 37.3185, lng: 127.1099 }; // 보정동(용인)
-  var MAX_GRID_CELLS = 2600;
+  var MAX_GRID_CELLS = 5200;
 
   // ---------------------------------------------------------------- 나라볼
   var COUNTRIES = [
@@ -606,7 +606,7 @@
     var C = country();
     var cw = v.cw;
     var chAbs = -v.ch;
-    var showGrid = cw >= 17 && v.count <= MAX_GRID_CELLS;
+    var showGrid = cw >= 14 && v.count <= MAX_GRID_CELLS;
     var showRange = cw >= 10 && v.count <= 12000;
     if (DBG) {
       DBG.showGrid = showGrid;
@@ -636,7 +636,7 @@
         }
       }
       gctx.lineWidth = 1;
-      gctx.strokeStyle = 'rgba(16,32,54,0.17)';
+      gctx.strokeStyle = 'rgba(16,32,54,0.2)';
       gctx.stroke();
     }
 
@@ -660,7 +660,7 @@
         }
       }
       if (anyRange) {
-        gctx.fillStyle = hexA(C.main, 0.13);
+        gctx.fillStyle = hexA(C.main, 0.15);
         gctx.fill();
         gctx.setLineDash([5, 4]);
         gctx.lineWidth = 1.3;
