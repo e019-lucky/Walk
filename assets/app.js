@@ -479,12 +479,13 @@
 
     var W = size.x;
     var H = size.y;
-    var dxFrom = Math.ceil((-cw - base.x) / cw);
-    var dxTo = Math.floor((W - base.x) / cw);
-    var dyFrom = Math.ceil((H - ch - base.y) / ch);
-    var dyTo = Math.floor((0 - base.y) / ch);
-    if (dxTo < dxFrom || dyTo < dyFrom) return null;
-    if (dxTo - dxFrom > 400 || dyTo - dyFrom > 400) return null;
+    // 화면을 덮는 칸 인덱스 범위 (dx = ix - cx, dy = iy - cy)
+    // base = 중심 칸의 남서(왼쪽 아래) 모서리. 화면 y는 위로 갈수록 작아진다.
+    var dxFrom = Math.floor(-base.x / cw) - 1;
+    var dxTo = Math.ceil((W - base.x) / cw) + 1;
+    var dyTo = Math.ceil(-base.y / ch) + 1;
+    var dyFrom = Math.floor((H - base.y) / ch) - 1;
+    if (!(dxTo >= dxFrom) || !(dyTo >= dyFrom)) return null;
 
     return {
       base: base,
@@ -508,6 +509,19 @@
   }
 
   // ---------------------------------------------------------------- 그리기
+  function dbgShow(obj) {
+    if (!DBG) return;
+    var el = document.getElementById('dbgBox');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'dbgBox';
+      el.style.cssText =
+        'position:fixed;left:8px;bottom:76px;z-index:9999;background:rgba(0,0,0,0.82);color:#7dff9b;' +
+        'font:11px/1.35 ui-monospace,monospace;padding:6px 8px;border-radius:6px;max-width:92vw;white-space:pre-wrap';
+      document.body.appendChild(el);
+    }
+    el.textContent = JSON.stringify(obj, null, 0);
+  }
   function ensureCanvas(canvas, ctx, W, H) {
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
     if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) {
@@ -548,6 +562,11 @@
       DBG.view = v;
       DBG.size = [W, H];
       DBG.lastDraw = Date.now();
+      dbgShow({
+        v: v && { cw: +v.cw.toFixed(2), bx: Math.round(v.base.x), by: Math.round(v.base.y),
+          dx: [v.dxFrom, v.dxTo], dy: [v.dyFrom, v.dyTo], n: v.count },
+        W: W, H: H, cells: Object.keys(S.cells).length, coins: S.coins
+      });
     }
     if (!v) return;
 
