@@ -3,42 +3,54 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
-<meta name="theme-color" content="#070b14" />
+<meta name="theme-color" content="#0a0f18" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<meta name="description" content="걸어서 땅따먹기 — 현실판 Paper.io. GPS로 이동하며 지도 위 내 영역을 넓히는 게임." />
-<title>현실판 Paper.io · 걸어서 땅따먹기</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b1220'/%3E%3Cpath d='M14 40 L26 20 L38 32 L50 18' stroke='%2322d3ee' stroke-width='5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='14' cy='40' r='5' fill='%2367e8f9'/%3E%3C/svg%3E" />
+<meta name="description" content="폴란드볼 고 — 지도 칸을 콕 눌러 점령하는 땅따먹기 게임. 나라볼 캐릭터를 고르고 걸어서 코인을 모아요." />
+<title>폴란드볼 고 · 칸 점령 땅따먹기</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%23ffffff'/%3E%3Cpath d='M2 32a30 30 0 0 0 60 0z' fill='%23dc143c'/%3E%3Ccircle cx='32' cy='32' r='30' fill='none' stroke='%230b1018' stroke-width='5'/%3E%3Ccircle cx='23' cy='27' r='6' fill='%2310151f'/%3E%3Ccircle cx='41' cy='27' r='6' fill='%2310151f'/%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://unpkg.com" crossorigin="" />
+<link rel="preconnect" href="https://tile.openstreetmap.org" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""
   onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css'" />
-<link rel="preconnect" href="https://unpkg.com" crossorigin="" />
-<link rel="preconnect" href="https://basemaps.cartocdn.com" crossorigin="" />
 <link rel="stylesheet" href="assets/style.css" />
 </head>
 <body>
   <div id="map"></div>
 
   <header class="hud hud-top">
-    <div class="chips">
-      <div class="chip">
-        <span class="chip-label">점령 면적</span>
-        <b id="statArea">0 m²</b>
+    <div class="top-left">
+      <div class="chips">
+        <div class="chip chip-coin">
+          <span class="chip-label">점령 코인</span>
+          <b><span class="coin-dot" aria-hidden="true"></span><span id="statCoins">10</span></b>
+        </div>
+        <div class="chip">
+          <span class="chip-label">점령 칸</span>
+          <b id="statCells">0</b>
+        </div>
       </div>
-      <div class="chip">
-        <span class="chip-label">점령 횟수</span>
-        <b id="statCount">0</b>
-      </div>
+      <div class="coinmeter" aria-hidden="true"><i id="coinFill"></i></div>
+      <span class="coinmeter-label" id="coinLabel">40m 더 걸으면 +1 코인</span>
     </div>
-    <button id="modeBtn" class="mode-btn" type="button" aria-pressed="false">
-      <span class="dot"></span><span id="modeLabel">GPS 모드</span>
-    </button>
-  </header>
 
-  <div id="accChip" class="acc-chip" hidden>GPS ±<span id="accVal">0</span>m</div>
+    <div class="top-right">
+      <button id="charBtn" class="char-btn" type="button" aria-label="캐릭터 선택">
+        <span class="char-mini" id="charMini"></span>
+        <span class="char-name" id="charName">대한민국</span>
+      </button>
+      <button id="modeBtn" class="mode-btn" type="button" aria-pressed="false">
+        <span class="dot" aria-hidden="true"></span><span id="modeLabel">GPS 모드</span>
+      </button>
+    </div>
+  </header>
 
   <div class="hud hud-bottom-left">
     <button id="locateBtn" class="round-btn" type="button" aria-label="내 위치">
       <span aria-hidden="true">◎</span><small>내 위치</small>
+    </button>
+    <button id="helpBtn" class="round-btn" type="button" aria-label="도움말">
+      <span aria-hidden="true">?</span><small>도움말</small>
     </button>
     <button id="resetBtn" class="round-btn" type="button" aria-label="초기화">
       <span aria-hidden="true">↺</span><small>초기화</small>
@@ -46,39 +58,54 @@
   </div>
 
   <div id="dpad" class="dpad" hidden>
-    <button class="pad-btn" type="button" data-dx="-1" data-dy="1" aria-label="왼쪽 위">↖</button>
+    <button class="pad-btn" type="button" data-dx="-1" data-dy="1" aria-label="왼쪽 아래">↙</button>
     <button class="pad-btn" type="button" data-dx="0" data-dy="1" aria-label="위">↑</button>
-    <button class="pad-btn" type="button" data-dx="1" data-dy="1" aria-label="오른쪽 위">↗</button>
+    <button class="pad-btn" type="button" data-dx="1" data-dy="1" aria-label="오른쪽 아래">↗</button>
     <button class="pad-btn" type="button" data-dx="-1" data-dy="0" aria-label="왼쪽">←</button>
     <button id="padStop" class="pad-btn pad-center" type="button" aria-label="멈추기">●</button>
     <button class="pad-btn" type="button" data-dx="1" data-dy="0" aria-label="오른쪽">→</button>
-    <button class="pad-btn" type="button" data-dx="-1" data-dy="-1" aria-label="왼쪽 아래">↙</button>
+    <button class="pad-btn" type="button" data-dx="-1" data-dy="-1" aria-label="왼쪽 위">↖</button>
     <button class="pad-btn" type="button" data-dx="0" data-dy="-1" aria-label="아래">↓</button>
-    <button class="pad-btn" type="button" data-dx="1" data-dy="-1" aria-label="오른쪽 아래">↘</button>
+    <button class="pad-btn" type="button" data-dx="1" data-dy="-1" aria-label="오른쪽 위">↘</button>
   </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <div id="celebrate" class="celebrate" aria-hidden="true"></div>
+  <div id="bootFail" class="boot-fail" hidden>지도를 불러오지 못했어요. 새로고침 해 주세요.</div>
 
-  <div id="helpSheet" class="sheet" hidden>
+  <!-- 캐릭터 선택 -->
+  <div id="charSheet" class="sheet" hidden>
     <div class="sheet-card">
-      <div class="badge">REAL PAPER.IO</div>
-      <h1>걸어서 땅따먹기</h1>
-      <p class="lead">지도 위를 걸으며 내 영역을 넓히는 게임</p>
-      <ol class="steps">
-        <li><b>영역 밖으로</b> 나가면 이동 궤적이 그려집니다.</li>
-        <li>다시 <b>내 영역 안으로</b> 들어오면 그 사이가 내 땅이 됩니다.</li>
-        <li>실내에서는 <b>테스트 패드</b>로 지도를 눌러 이동해 보세요.</li>
-      </ol>
-      <button id="helpClose" class="primary-btn" type="button">시작하기</button>
-      <p class="fine">위치는 이 기기 안에서만 쓰이고 서버로 보내지 않습니다. 점령한 영역은 이 브라우저에 저장됩니다.</p>
+      <div class="sheet-head">
+        <h2>캐릭터 선택</h2>
+        <button class="x-btn" type="button" data-close="charSheet" aria-label="닫기">✕</button>
+      </div>
+      <p class="lead">나라볼을 고르면 그 나라 색으로 땅을 점령해요.</p>
+      <div id="charGrid" class="char-grid"></div>
     </div>
   </div>
 
+  <!-- 도움말 -->
+  <div id="helpSheet" class="sheet" hidden>
+    <div class="sheet-card">
+      <div class="badge">POLANDBALL GO</div>
+      <h1>칸을 콕, 눌러서 점령</h1>
+      <p class="lead">내 주변 칸이 반짝이면 그 칸을 눌러 점령하세요.</p>
+      <ul class="guide">
+        <li><b>칸 누르기</b> 코인 1개로 그 칸이 내 땅이 돼요. 반짝이는 칸은 반경 200m 안이에요.</li>
+        <li><b>점령 코인</b> 40m 걸으면 +1, 지도에 떨어진 코인은 +2!</li>
+        <li><b>자동 회복</b> 코인이 10개보다 적으면 30초마다 1개씩 채워져요.</li>
+        <li><b>테스트 패드</b> 방향키로 이동하고, 멀리 있는 칸을 누르면 그쪽으로 걸어가요.</li>
+      </ul>
+      <button id="helpClose" class="primary-btn" type="button">시작하기</button>
+      <p class="fine">위치는 이 기기 안에서만 쓰이고 서버로 보내지 않습니다. 점령한 칸은 이 브라우저에 저장됩니다.</p>
+    </div>
+  </div>
+
+  <!-- 초기화 -->
   <div id="resetSheet" class="sheet" hidden>
     <div class="sheet-card">
       <h2>처음부터 다시 시작할까요?</h2>
-      <p class="lead">지금 위치에 새 기지(반경 35m)를 만들고 점령 면적과 횟수를 0으로 되돌립니다.</p>
+      <p class="lead">점령한 칸, 코인, 기록이 모두 사라지고 코인 10개로 새로 시작해요.</p>
       <div class="row">
         <button id="resetCancel" class="ghost-btn" type="button">취소</button>
         <button id="resetConfirm" class="primary-btn danger" type="button">초기화</button>
@@ -88,15 +115,9 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script>
-    /* CDN 장애 대비 대체 로더 (파싱 중 동기 삽입) */
+    /* CDN 장애 대비 대체 로더 */
     if (!window.L) {
       document.write('<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"><\/script>');
-    }
-  </script>
-  <script src="https://unpkg.com/@turf/turf@7.0.0/turf.min.js" crossorigin=""></script>
-  <script>
-    if (!window.turf) {
-      document.write('<script src="https://cdn.jsdelivr.net/npm/@turf/turf@7.0.0/turf.min.js"><\/script>');
     }
   </script>
   <script src="assets/app.js"></script>

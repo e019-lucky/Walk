@@ -1,24 +1,192 @@
-/* 현실판 Paper.io — 걸어서 땅따먹기
- * GPS로 이동하며 내 영역을 넓히는 지도 게임 (Leaflet + Turf.js, 빌드 없음)
+/* ⚽ 폴란드볼 고 — 칸 점령 땅따먹기
+ * 지도 칸을 콕 눌러 점령하는 위치 기반 게임 (Leaflet, 빌드 없음)
  */
 (function () {
   'use strict';
 
-  var turf = window.turf;
-  var Lmap = window.L;
+  var Lm = window.L;
+  if (!Lm) {
+    var bf = document.getElementById('bootFail');
+    if (bf) bf.hidden = false;
+    return;
+  }
 
-  var STORE_KEY = 'realpaperio.v1';
-  var DEFAULT_CENTER = { lat: 37.3185, lng: 127.1099 }; // 보정동(용인) 기본 좌표
-  var HOME_RADIUS_M = 35;
-  var ZOOM_DEFAULT = 18;
-  var TEST_SPEED = 2.6; // 테스트 패드 이동 속도 m/s
-  var GPS_MAX_ACC = 45; // m — 이보다 부정확한 측정은 궤적에 반영하지 않음
-  var GPS_MIN_MOVE = 1.2; // m
-  var TEST_MIN_MOVE = 0.8; // m
-  var MIN_CAPTURE_M2 = 1.5;
-  var MAX_TRAIL_POINTS = 2000;
+  // ---------------------------------------------------------------- 상수
+  var STORE_KEY = 'walk_polandball_v1';
 
-  // ---------------------------------------------------------------- helpers
+  var CELL_M = 80; // 머케이터 기준 칸 크기 (위도 37.5° ≈ 63m)
+  var CAPTURE_RANGE_M = 200; // 점령 가능 반경
+  var START_COINS = 10;
+  var COIN_STEP_M = 40; // 40m 이동 = 코인 1
+  var PASSIVE_MS = 30000; // 코인 자동 회복 주기
+  var PASSIVE_MAX = 10; // 코인이 이 값보다 적을 때만 회복
+  var DROP_VALUE = 2;
+  var DROP_MAX = 4;
+  var DROP_SPAWN_MS = 5500;
+  var DROP_LIFE_MS = 150000;
+  var DROP_PICK_M = 30;
+  var DROP_SPAWN_MAX_M = 170;
+  var TEST_SPEED = 3.6; // m/s (D-pad)
+  var WALK_SPEED = 9; // m/s (탭 이동)
+  var DEFAULT_ZOOM = 16;
+  var DEFAULT_CENTER = { lat: 37.3185, lng: 127.1099 }; // 보정동(용인)
+  var MAX_GRID_CELLS = 2600;
+
+  // ---------------------------------------------------------------- 나라볼
+  var COUNTRIES = [
+    { code: 'KR', name: '대한민국', main: '#2e6be6', dark: '#1b4b9e', alt: '#e0453f' },
+    { code: 'PL', name: '폴란드', main: '#e0453f', dark: '#9c2530', alt: '#ffffff' },
+    { code: 'US', name: '미국', main: '#4553c4', dark: '#242f80', alt: '#e0453f' },
+    { code: 'JP', name: '일본', main: '#e8556e', dark: '#a32c42', alt: '#ffffff' },
+    { code: 'GB', name: '영국', main: '#1b3a6b', dark: '#0f2344', alt: '#e0453f' },
+    { code: 'DE', name: '독일', main: '#d9a520', dark: '#8f6a0d', alt: '#1b1f27' },
+    { code: 'FR', name: '프랑스', main: '#4e8ae0', dark: '#28568f', alt: '#e0453f' }
+  ];
+
+  function flagArt(code, c, r) {
+    var x = c - r;
+    var y = c - r;
+    var d = 2 * r;
+    var s = '';
+    var i;
+
+    if (code === 'KR') {
+      s += '<circle cx="' + c + '" cy="' + c + '" r="' + r + '" fill="#ffffff"/>';
+      s += '<circle cx="' + c + '" cy="' + c + '" r="' + r + '" fill="#1c4fa8"/>';
+      s +=
+        '<path d="M ' + (c - r) + ' ' + c +
+        ' A ' + r + ' ' + r + ' 0 0 1 ' + (c + r) + ' ' + c +
+        ' A ' + (r / 2) + ' ' + (r / 2) + ' 0 0 1 ' + c + ' ' + c +
+        ' A ' + (r / 2) + ' ' + (r / 2) + ' 0 0 0 ' + (c - r) + ' ' + c +
+        ' Z" fill="#c8102e"/>';
+      var angs = [45, 135, 225, 315];
+      for (i = 0; i < 4; i++) {
+        var a = (angs[i] * Math.PI) / 180;
+        var tx = c + Math.cos(a) * r * 0.76;
+        var ty = c + Math.sin(a) * r * 0.76;
+        s += '<g transform="translate(' + tx.toFixed(2) + ',' + ty.toFixed(2) + ') rotate(' + angs[i] + ')">';
+        for (var k = -1; k <= 1; k++) {
+          s +=
+            '<rect x="' + (-r * 0.15).toFixed(2) + '" y="' + (k * r * 0.105 - r * 0.021).toFixed(2) +
+            '" width="' + (r * 0.3).toFixed(2) + '" height="' + (r * 0.042).toFixed(2) + '" fill="#10151f"/>';
+        }
+        s += '</g>';
+      }
+      return s;
+    }
+
+    if (code === 'PL') {
+      s += '<rect x="' + x + '" y="' + y + '" width="' + d + '" height="' + r + '" fill="#ffffff"/>';
+      s += '<rect x="' + x + '" y="' + c + '" width="' + d + '" height="' + r + '" fill="#dc143c"/>';
+      return s;
+    }
+
+    if (code === 'US') {
+      var n = 7;
+      var sh = d / n;
+      for (i = 0; i < n; i++) {
+        s += '<rect x="' + x + '" y="' + (y + i * sh).toFixed(2) + '" width="' + d +
+          '" height="' + (sh + 0.5).toFixed(2) + '" fill="' + (i % 2 === 0 ? '#b22234' : '#ffffff') + '"/>';
+      }
+      s += '<rect x="' + x + '" y="' + y + '" width="' + (d * 0.56).toFixed(2) + '" height="' +
+        (sh * 4).toFixed(2) + '" fill="#3c3b6e"/>';
+      for (var r0 = 0; r0 < 3; r0++) {
+        for (var c0 = 0; c0 < 4; c0++) {
+          s += '<circle cx="' + (x + d * 0.1 + c0 * d * 0.12).toFixed(2) + '" cy="' +
+            (y + sh * 0.62 + r0 * sh * 1.05).toFixed(2) + '" r="' + (r * 0.045).toFixed(2) +
+            '" fill="#ffffff"/>';
+        }
+      }
+      return s;
+    }
+
+    if (code === 'JP') {
+      s += '<rect x="' + x + '" y="' + y + '" width="' + d + '" height="' + d + '" fill="#ffffff"/>';
+      s += '<circle cx="' + c + '" cy="' + c + '" r="' + (r * 0.62).toFixed(2) + '" fill="#bc002d"/>';
+      return s;
+    }
+
+    if (code === 'GB') {
+      s += '<rect x="' + x + '" y="' + y + '" width="' + d + '" height="' + d + '" fill="#012169"/>';
+      s += '<path d="M' + x + ' ' + y + ' L' + (x + d) + ' ' + (y + d) + ' M' + (x + d) + ' ' + y +
+        ' L' + x + ' ' + (y + d) + '" stroke="#ffffff" stroke-width="' + (r * 0.34).toFixed(2) + '"/>';
+      s += '<path d="M' + x + ' ' + y + ' L' + (x + d) + ' ' + (y + d) + ' M' + (x + d) + ' ' + y +
+        ' L' + x + ' ' + (y + d) + '" stroke="#c8102e" stroke-width="' + (r * 0.16).toFixed(2) + '"/>';
+      s += '<path d="M' + c + ' ' + y + ' V' + (y + d) + ' M' + x + ' ' + c + ' H' + (x + d) +
+        '" stroke="#ffffff" stroke-width="' + (r * 0.5).toFixed(2) + '"/>';
+      s += '<path d="M' + c + ' ' + y + ' V' + (y + d) + ' M' + x + ' ' + c + ' H' + (x + d) +
+        '" stroke="#c8102e" stroke-width="' + (r * 0.3).toFixed(2) + '"/>';
+      return s;
+    }
+
+    if (code === 'DE') {
+      s += '<rect x="' + x + '" y="' + y + '" width="' + d + '" height="' + (d / 3).toFixed(2) + '" fill="#111111"/>';
+      s += '<rect x="' + x + '" y="' + (y + d / 3).toFixed(2) + '" width="' + d + '" height="' +
+        (d / 3).toFixed(2) + '" fill="#dd0000"/>';
+      s += '<rect x="' + x + '" y="' + (y + (2 * d) / 3).toFixed(2) + '" width="' + d + '" height="' +
+        (d / 3).toFixed(2) + '" fill="#ffce00"/>';
+      return s;
+    }
+
+    if (code === 'FR') {
+      s += '<rect x="' + x + '" y="' + y + '" width="' + (d / 3).toFixed(2) + '" height="' + d + '" fill="#0055a4"/>';
+      s += '<rect x="' + (x + d / 3).toFixed(2) + '" y="' + y + '" width="' + (d / 3).toFixed(2) +
+        '" height="' + d + '" fill="#ffffff"/>';
+      s += '<rect x="' + (x + (2 * d) / 3).toFixed(2) + '" y="' + y + '" width="' + (d / 3).toFixed(2) +
+        '" height="' + d + '" fill="#ef4135"/>';
+      return s;
+    }
+
+    return '<rect x="' + x + '" y="' + y + '" width="' + d + '" height="' + d + '" fill="#8899aa"/>';
+  }
+
+  function eyesArt(c, r) {
+    var s = '';
+    var ex = r * 0.36;
+    var ey = c - r * 0.03;
+    var rx = r * 0.2;
+    var ry = r * 0.245;
+    var pr = r * 0.105;
+    var side;
+    for (side = -1; side <= 1; side += 2) {
+      var x = c + side * ex;
+      s += '<ellipse cx="' + x.toFixed(2) + '" cy="' + ey.toFixed(2) + '" rx="' + rx.toFixed(2) +
+        '" ry="' + ry.toFixed(2) + '" fill="#ffffff" stroke="#10151f" stroke-width="' + (r * 0.032).toFixed(2) + '"/>';
+      s += '<circle cx="' + (x + side * r * 0.02).toFixed(2) + '" cy="' + (ey + r * 0.055).toFixed(2) +
+        '" r="' + pr.toFixed(2) + '" fill="#10151f"/>';
+      s += '<circle cx="' + (x + side * r * 0.02 - pr * 0.34).toFixed(2) + '" cy="' +
+        (ey + r * 0.055 - pr * 0.42).toFixed(2) + '" r="' + (pr * 0.36).toFixed(2) + '" fill="#ffffff"/>';
+    }
+    s += '<path d="M ' + (c - r * 0.17).toFixed(2) + ' ' + (c + r * 0.33).toFixed(2) +
+      ' Q ' + c + ' ' + (c + r * 0.5).toFixed(2) + ' ' + (c + r * 0.17).toFixed(2) + ' ' +
+      (c + r * 0.33).toFixed(2) + '" fill="none" stroke="#10151f" stroke-width="' + (r * 0.06).toFixed(2) +
+      '" stroke-linecap="round"/>';
+    return s;
+  }
+
+  function ballSVG(code, uid, size) {
+    var s = size || 64;
+    var c = s / 2;
+    var r = s / 2 - s * 0.03;
+    var clip = 'pbclip_' + uid;
+    var grad = 'pbgrad_' + uid;
+    var out = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + s + ' ' + s + '" width="' + s +
+      '" height="' + s + '" aria-hidden="true" focusable="false">';
+    out += '<defs><clipPath id="' + clip + '"><circle cx="' + c + '" cy="' + c + '" r="' + r + '"/></clipPath>';
+    out += '<radialGradient id="' + grad + '" cx="0.34" cy="0.26" r="0.92">' +
+      '<stop offset="0" stop-color="#ffffff" stop-opacity="0.36"/>' +
+      '<stop offset="0.5" stop-color="#ffffff" stop-opacity="0.02"/>' +
+      '<stop offset="1" stop-color="#000000" stop-opacity="0.28"/></radialGradient></defs>';
+    out += '<g clip-path="url(#' + clip + ')">' + flagArt(code, c, r) + '</g>';
+    out += '<circle cx="' + c + '" cy="' + c + '" r="' + r + '" fill="url(#' + grad + ')"/>';
+    out += eyesArt(c, r);
+    out += '<circle cx="' + c + '" cy="' + c + '" r="' + r + '" fill="none" stroke="#0c1220" stroke-width="' +
+      (s * 0.045).toFixed(2) + '" stroke-linejoin="round"/>';
+    out += '</svg>';
+    return out;
+  }
+
+  // ---------------------------------------------------------------- 유틸
   function $(id) {
     return document.getElementById(id);
   }
@@ -27,31 +195,23 @@
     return v < a ? a : v > b ? b : v;
   }
 
-  function dist(a, b) {
+  function hexA(hex, a) {
+    var h = String(hex).replace('#', '');
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    var n = parseInt(h, 16);
+    return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+  }
+
+  function distM(a, b) {
     if (!a || !b) return 0;
-    try {
-      return turf.distance([a.lng, a.lat], [b.lng, b.lat], { units: 'kilometers' }) * 1000;
-    } catch (e) {
-      return 0;
-    }
-  }
-
-  function areaOf(f) {
-    if (!f) return 0;
-    try {
-      var a = turf.area(f);
-      return isFinite(a) ? a : 0;
-    } catch (e) {
-      return 0;
-    }
-  }
-
-  function fmtArea(m2) {
-    if (!isFinite(m2) || m2 <= 0) return '0 m²';
-    if (m2 >= 1000000) return (m2 / 1000000).toFixed(2) + ' km²';
-    if (m2 >= 1000) return Math.round(m2).toLocaleString('ko-KR') + ' m²';
-    if (m2 >= 100) return Math.round(m2) + ' m²';
-    return m2.toFixed(1) + ' m²';
+    var R = 6371000;
+    var la1 = (a.lat * Math.PI) / 180;
+    var la2 = (b.lat * Math.PI) / 180;
+    var dLa = la2 - la1;
+    var dLo = ((b.lng - a.lng) * Math.PI) / 180;
+    var s = Math.sin(dLa / 2) * Math.sin(dLa / 2) +
+      Math.cos(la1) * Math.cos(la2) * Math.sin(dLo / 2) * Math.sin(dLo / 2);
+    return 2 * R * Math.asin(Math.sqrt(Math.min(1, Math.max(0, s))));
   }
 
   function haptic(p) {
@@ -60,263 +220,521 @@
     } catch (e) {}
   }
 
-  // ---------------------------------------------------------------- state
+  function nowMs() {
+    return window.performance && performance.now ? performance.now() : Date.now();
+  }
+
+  var CRS = null;
+
+  function cellOf(lat, lng) {
+    var p = CRS.project(Lm.latLng(lat, lng));
+    var ix = Math.floor(p.x / CELL_M);
+    var iy = Math.floor(p.y / CELL_M);
+    return { ix: ix, iy: iy, key: ix + '_' + iy };
+  }
+
+  function cellLatLng(ix, iy) {
+    var ll = CRS.unproject(Lm.point(ix * CELL_M, iy * CELL_M));
+    return Lm.latLng(ll.lat, ll.lng);
+  }
+
+  function cellCenter(ix, iy) {
+    var ll = CRS.unproject(Lm.point((ix + 0.5) * CELL_M, (iy + 0.5) * CELL_M));
+    return { lat: ll.lat, lng: ll.lng };
+  }
+
+  // ---------------------------------------------------------------- 상태
   var S = {
-    territory: null,
-    home: null,
-    stats: { area: 0, captures: 0 },
+    cells: {},
+    cellCount: 0,
+    coins: START_COINS,
+    captures: 0,
+    coinsEarned: 0,
+    walkAccum: 0,
+    totalDist: 0,
+    country: 'KR',
     mode: 'gps',
-    player: null,
-    lastInside: null,
-    insideStreak: 0,
-    follow: true,
-    trail: [],
-    trailActive: false,
-    trailDistance: 0,
-    walkTarget: null,
-    watchId: null,
-    raf: null,
-    lastT: 0,
-    dpad: { x: 0, y: 0 },
+    player: { lat: DEFAULT_CENTER.lat, lng: DEFAULT_CENTER.lng },
+    lastRecharge: Date.now(),
+    drops: [],
     helpShown: false,
-    farHintShown: false
+    follow: true,
+    gpsAcc: 0,
+    gpsGot: false
   };
 
   var map = null;
-  var territoryLayer = null;
-  var trailGlow = null;
-  var trailLine = null;
-  var previewPoly = null;
+  var gcanvas = null;
+  var gctx = null;
+  var fxcanvas = null;
+  var fxctx = null;
   var playerMarker = null;
   var targetMarker = null;
+  var watchId = null;
+  var suppress = false;
+  var walkTarget = null;
+  var dpad = { x: 0, y: 0 };
+  var bursts = [];
+  var fxDirty = false;
+  var drawQueued = false;
+  var lastPan = 0;
+  var lastSave = 0;
+  var lastTick = 0;
 
-  var playerIcon = null;
-  var targetIcon = null;
+  function country() {
+    for (var i = 0; i < COUNTRIES.length; i++) {
+      if (COUNTRIES[i].code === S.country) return COUNTRIES[i];
+    }
+    return COUNTRIES[0];
+  }
 
-  // ---------------------------------------------------------------- geometry
-  function makeBase(c) {
-    return turf.circle([c.lng, c.lat], HOME_RADIUS_M / 1000, {
-      steps: 72,
-      units: 'kilometers'
+  // ---------------------------------------------------------------- 저장
+  function save() {
+    try {
+      localStorage.setItem(
+        STORE_KEY,
+        JSON.stringify({
+          v: 1,
+          cells: S.cells,
+          coins: S.coins,
+          captures: S.captures,
+          coinsEarned: S.coinsEarned,
+          walkAccum: S.walkAccum,
+          totalDist: Math.round(S.totalDist),
+          country: S.country,
+          mode: S.mode,
+          player: S.player,
+          helpShown: S.helpShown,
+          savedAt: Date.now()
+        })
+      );
+    } catch (e) {}
+  }
+
+  function load() {
+    var d = null;
+    try {
+      d = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
+    } catch (e) {
+      d = null;
+    }
+    if (!d || d.v !== 1) return;
+
+    if (d.cells && typeof d.cells === 'object') {
+      var cells = {};
+      var n = 0;
+      Object.keys(d.cells).forEach(function (k) {
+        if (/^-?\d+_-?\d+$/.test(k)) {
+          cells[k] = typeof d.cells[k] === 'number' ? d.cells[k] : 1;
+          n++;
+        }
+      });
+      S.cells = cells;
+      S.cellCount = n;
+    }
+    S.coins = isFinite(d.coins) ? clamp(Math.round(d.coins), 0, 9999) : START_COINS;
+    S.captures = isFinite(d.captures) ? d.captures : 0;
+    S.coinsEarned = isFinite(d.coinsEarned) ? d.coinsEarned : 0;
+    S.walkAccum = isFinite(d.walkAccum) ? clamp(d.walkAccum, 0, COIN_STEP_M) : 0;
+    S.totalDist = isFinite(d.totalDist) ? d.totalDist : 0;
+    if (d.player && isFinite(d.player.lat) && isFinite(d.player.lng)) {
+      S.player = { lat: d.player.lat, lng: d.player.lng };
+    }
+    var ok = false;
+    for (var i = 0; i < COUNTRIES.length; i++) {
+      if (COUNTRIES[i].code === d.country) ok = true;
+    }
+    S.country = ok ? d.country : 'KR';
+    S.mode = d.mode === 'test' ? 'test' : 'gps';
+    S.helpShown = !!d.helpShown;
+    S.lastRecharge = Date.now();
+  }
+
+  // ---------------------------------------------------------------- 지도
+  function initMap() {
+    CRS = Lm.CRS.EPSG3857;
+
+    map = Lm.map('map', {
+      center: [S.player.lat, S.player.lng],
+      zoom: DEFAULT_ZOOM,
+      minZoom: 13,
+      maxZoom: 19,
+      zoomControl: false,
+      doubleClickZoom: false,
+      zoomSnap: 0.5,
+      zoomDelta: 0.5,
+      attributionControl: true
+    });
+
+    Lm.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>'
+    }).addTo(map);
+
+    gcanvas = Lm.DomUtil.create('canvas', 'wx-canvas');
+    gctx = gcanvas.getContext('2d');
+    map.getPanes().overlayPane.appendChild(gcanvas);
+    fxcanvas = Lm.DomUtil.create('canvas', 'wx-canvas');
+    fxctx = fxcanvas.getContext('2d');
+    map.getPanes().overlayPane.appendChild(fxcanvas);
+
+    playerMarker = Lm.marker(S.player, {
+      icon: makeBallIcon(64),
+      interactive: false,
+      keyboard: false,
+      zIndexOffset: 600
+    }).addTo(map);
+
+    map.on('move zoomend resize moveend viewreset', onMapMove);
+    map.on('zoomanim', function (e) {
+      suppress = true;
+      zoomCanvas(gcanvas, e);
+      zoomCanvas(fxcanvas, e);
+    });
+    map.on('zoomend', function () {
+      suppress = false;
+      if (gcanvas) gcanvas.style.opacity = '1';
+      if (fxcanvas) fxcanvas.style.opacity = '1';
+      requestDraw();
+    });
+    map.on('dragstart', function () {
+      S.follow = false;
+    });
+    map.on('click', function (e) {
+      onCellTap(cellOf(e.latlng.lat, e.latlng.lng));
+    });
+
+    requestDraw();
+  }
+
+  function makeBallIcon(size) {
+    var s = size || 64;
+    return Lm.divIcon({
+      className: 'ball-icon',
+      html: '<span class="ball-halo"></span>' + ballSVG(S.country, 'mk', s),
+      iconSize: [s, s],
+      iconAnchor: [s / 2, s / 2]
     });
   }
 
-  function centroidOf(f) {
-    try {
-      var c = turf.centroid(f).geometry.coordinates;
-      return { lat: c[1], lng: c[0] };
-    } catch (e) {
-      return { lat: DEFAULT_CENTER.lat, lng: DEFAULT_CENTER.lng };
-    }
+  function makeTargetIcon() {
+    return Lm.divIcon({
+      className: 'target-icon',
+      html: '<span></span>',
+      iconSize: [18, 18],
+      iconAnchor: [9, 9]
+    });
   }
 
-  function pointInTerritory(p) {
-    if (!S.territory || !p) return false;
-    try {
-      var pt = turf.point([p.lng, p.lat]);
-      var g = S.territory.geometry;
-      if (!g) return false;
-      if (g.type === 'MultiPolygon') {
-        for (var i = 0; i < g.coordinates.length; i++) {
-          try {
-            if (turf.booleanPointInPolygon(pt, turf.polygon(g.coordinates[i]))) return true;
-          } catch (e) {}
-        }
-        return false;
-      }
-      return turf.booleanPointInPolygon(pt, S.territory);
-    } catch (e) {
-      return false;
-    }
-  }
-
-  function unionTwo(a, b) {
-    if (!a) return b || null;
-    if (!b) return a || null;
-    var r;
-    try {
-      r = turf.union(a, b);
-      if (r && r.geometry) return r;
-    } catch (e) {}
-    try {
-      r = turf.union(turf.featureCollection([a, b]));
-      if (r && r.geometry) return r;
-    } catch (e) {}
-    return null;
-  }
-
-  function boundsOf(coords) {
-    var b = [Infinity, Infinity, -Infinity, -Infinity];
-    for (var i = 0; i < coords.length; i++) {
-      var c = coords[i];
-      if (c[0] < b[0]) b[0] = c[0];
-      if (c[1] < b[1]) b[1] = c[1];
-      if (c[0] > b[2]) b[2] = c[0];
-      if (c[1] > b[3]) b[3] = c[1];
-    }
-    return b;
-  }
-
-  function bboxAreaM2(b) {
-    var midLat = (b[1] + b[3]) / 2;
-    var w = Math.abs((b[2] - b[0]) * 111320 * Math.cos((midLat * Math.PI) / 180));
-    var h = Math.abs((b[3] - b[1]) * 111320);
-    return w * h;
-  }
-
-  function safeUnion(base, add, before, capLimit) {
-    var out = unionTwo(base, add);
-    if (!out || !out.geometry) return null;
-    var t = out.geometry.type;
-    if (t !== 'Polygon' && t !== 'MultiPolygon') return null;
-    var after = areaOf(out);
-    if (!isFinite(after) || after <= 0) return null;
-    var gain = after - before;
-    if (gain < -0.5) return null; // 합쳤는데 줄어들면 실패로 본다
-    if (gain > capLimit) return null; // 비정상적으로 큰 점령 방지
-    return { feature: out, area: after };
-  }
-
-  // 궤적 점들로 점령 영역을 만든다. 자기 교차 궤적에서도 실패하지 않도록 단계별 대체 경로 사용.
-  function buildCapture(pts) {
-    if (!S.territory || !pts || pts.length < 3) return null;
-
-    var coords = [];
-    for (var i = 0; i < pts.length; i++) {
-      var c = [pts[i].lng, pts[i].lat];
-      var prev = coords[coords.length - 1];
-      if (!prev || Math.abs(prev[0] - c[0]) > 1e-9 || Math.abs(prev[1] - c[1]) > 1e-9) {
-        coords.push(c);
-      }
-    }
-    if (coords.length > 3) {
-      try {
-        var simp = turf.simplify(turf.lineString(coords), {
-          tolerance: 0.000012,
-          highQuality: false,
-          mutate: false
-        });
-        if (simp && simp.geometry.coordinates.length >= 3) coords = simp.geometry.coordinates;
-      } catch (e) {}
-    }
-    if (coords.length < 3) return null;
-
-    var bbox = boundsOf(coords);
-    var capLimit = Math.max(bboxAreaM2(bbox) * 2, 3000);
-    var before = areaOf(S.territory);
-
-    // 1) 궤적을 그대로 닫은 다각형 + 기존 영역
-    var ring = coords.slice();
-    var first = ring[0];
-    var last = ring[ring.length - 1];
-    if (Math.abs(first[0] - last[0]) > 1e-9 || Math.abs(first[1] - last[1]) > 1e-9) {
-      ring.push([first[0], first[1]]);
-    }
-    if (ring.length >= 4) {
-      var loop = null;
-      try {
-        loop = turf.polygon([ring]);
-      } catch (e) {
-        loop = null;
-      }
-      if (loop) {
-        var r1 = safeUnion(S.territory, loop, before, capLimit);
-        if (r1) return r1;
-      }
-    }
-
-    // 2) 궤적을 얇은 띠로 만들어 합치기 (자기 교차 궤적도 안전)
-    var r2 = null;
-    try {
-      var ribbon = turf.buffer(turf.lineString(coords), 0.0015, {
-        units: 'kilometers',
-        steps: 6
-      });
-      if (ribbon) r2 = safeUnion(S.territory, ribbon, before, capLimit);
-    } catch (e) {
-      r2 = null;
-    }
-    if (r2) return r2;
-
-    // 3) 마지막 수단: 뾰족한 삼각형 점령을 막기 위해 궤적 볼록 껍질을 아주 낮은 비중으로 사용하지 않고 포기
-    return null;
-  }
-
-  // ---------------------------------------------------------------- render
-  function renderTerritory() {
-    if (!territoryLayer) return;
-    territoryLayer.clearLayers();
-    if (!S.territory) return;
-    try {
-      Lmap.geoJSON(S.territory, {
+  function setTargetMarker(p) {
+    if (!targetMarker) {
+      targetMarker = Lm.marker(p, {
+        icon: makeTargetIcon(),
         interactive: false,
-        style: function () {
-          return { color: '#22d3ee', weight: 14, opacity: 0.1, fill: false, lineJoin: 'round' };
-        }
-      }).addTo(territoryLayer);
-      Lmap.geoJSON(S.territory, {
-        interactive: false,
-        style: function () {
-          return {
-            color: '#3ee9ff',
-            weight: 2.5,
-            opacity: 0.95,
-            fillColor: '#22d3ee',
-            fillOpacity: 0.18,
-            lineJoin: 'round'
-          };
-        }
-      }).addTo(territoryLayer);
-    } catch (e) {}
-  }
-
-  function updateStats() {
-    var a = $('statArea');
-    var c = $('statCount');
-    if (a) a.textContent = fmtArea(S.stats.area);
-    if (c) c.textContent = String(S.stats.captures);
-  }
-
-  function trailLatLngs() {
-    var out = [];
-    for (var i = 0; i < S.trail.length; i++) {
-      out.push([S.trail[i].lat, S.trail[i].lng]);
-    }
-    if (S.trailActive && S.player) {
-      var p = [S.player.lat, S.player.lng];
-      var last = out[out.length - 1];
-      if (!last || last[0] !== p[0] || last[1] !== p[1]) out.push(p);
-    }
-    return out;
-  }
-
-  function drawTrail() {
-    if (!trailGlow) return;
-    var pts = trailLatLngs();
-    trailGlow.setLatLngs(pts);
-    trailLine.setLatLngs(pts);
-    if (pts.length >= 3) {
-      try {
-        previewPoly.setLatLngs(pts);
-      } catch (e) {
-        previewPoly.setLatLngs([]);
-      }
+        keyboard: false,
+        zIndexOffset: 400
+      }).addTo(map);
     } else {
-      previewPoly.setLatLngs([]);
+      targetMarker.setLatLng(p);
     }
   }
 
-  function clearTrail() {
-    S.trailActive = false;
-    S.trail = [];
-    S.trailDistance = 0;
-    S.insideStreak = 0;
-    if (trailGlow) trailGlow.setLatLngs([]);
-    if (trailLine) trailLine.setLatLngs([]);
-    if (previewPoly) previewPoly.setLatLngs([]);
+  function clearTargetMarker() {
+    if (targetMarker) {
+      map.removeLayer(targetMarker);
+      targetMarker = null;
+    }
   }
 
-  // ---------------------------------------------------------------- toast / celebrate
+  function onMapMove() {
+    if (!suppress) requestDraw();
+  }
+
+  function requestDraw() {
+    if (drawQueued) return;
+    drawQueued = true;
+    window.requestAnimationFrame(function () {
+      drawQueued = false;
+      drawGrid();
+    });
+  }
+
+  // ---------------------------------------------------------------- 뷰 계산
+  // 칸 격자는 머케이터 미터 좌표에 고정 → 지도를 움직여도 칸이 밀리지 않는다.
+  function computeView() {
+    if (!map) return null;
+    var size = map.getSize();
+    if (!size || !size.x || !size.y) return null;
+    var center = map.getCenter();
+    var cc = cellOf(center.lat, center.lng);
+
+    var base = map.latLngToContainerPoint(cellLatLng(cc.ix, cc.iy));
+    var pX = map.latLngToContainerPoint(cellLatLng(cc.ix + 1, cc.iy));
+    var pY = map.latLngToContainerPoint(cellLatLng(cc.ix, cc.iy + 1));
+    var cw = pX.x - base.x;
+    var ch = pY.y - base.y;
+    if (!(cw > 0.4) || !(ch < -0.4)) return null;
+
+    var W = size.x;
+    var H = size.y;
+    var dxFrom = Math.ceil((-cw - base.x) / cw);
+    var dxTo = Math.floor((W - base.x) / cw);
+    var dyFrom = Math.ceil((H - ch - base.y) / ch);
+    var dyTo = Math.floor((0 - base.y) / ch);
+    if (dxTo < dxFrom || dyTo < dyFrom) return null;
+    if (dxTo - dxFrom > 400 || dyTo - dyFrom > 400) return null;
+
+    return {
+      base: base,
+      cw: cw,
+      ch: ch,
+      cx: cc.ix,
+      cy: cc.iy,
+      dxFrom: dxFrom,
+      dxTo: dxTo,
+      dyFrom: dyFrom,
+      dyTo: dyTo,
+      count: (dxTo - dxFrom + 1) * (dyTo - dyFrom + 1)
+    };
+  }
+
+  function cellScreen(v, ix, iy) {
+    return {
+      x: v.base.x + (ix - v.cx + 0.5) * v.cw,
+      y: v.base.y + (iy - v.cy + 0.5) * v.ch
+    };
+  }
+
+  // ---------------------------------------------------------------- 그리기
+  function ensureCanvas(canvas, ctx, W, H) {
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) {
+      canvas.width = Math.round(W * dpr);
+      canvas.height = Math.round(H * dpr);
+      canvas.style.width = W + 'px';
+      canvas.style.height = H + 'px';
+    }
+    Lm.DomUtil.setPosition(canvas, map.containerPointToLayerPoint([0, 0]));
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return dpr;
+  }
+
+  // 확대 애니메이션 동안 캔버스를 타일과 같은 배율로 따라가게 한다.
+  function zoomCanvas(canvas, e) {
+    if (!canvas || !canvas.style) return;
+    try {
+      var scale = map.getZoomScale(e.zoom);
+      var ll = map.containerPointToLatLng([0, 0]);
+      var offset = map._latLngToNewLayerPoint(ll, e.zoom, e.center);
+      Lm.DomUtil.setTransform(canvas, offset, scale);
+    } catch (err) {
+      canvas.style.opacity = '0';
+    }
+  }
+
+  function drawGrid() {
+    if (!gctx || !map) return;
+    var size = map.getSize();
+    if (!size || !size.x) return;
+    var W = size.x;
+    var H = size.y;
+    ensureCanvas(gcanvas, gctx, W, H);
+    gctx.clearRect(0, 0, W, H);
+
+    var v = computeView();
+    if (!v) return;
+
+    var C = country();
+    var cw = v.cw;
+    var chAbs = -v.ch;
+    var showGrid = cw >= 17 && v.count <= MAX_GRID_CELLS;
+    var showRange = cw >= 10;
+
+    var pm = CRS.project(Lm.latLng(S.player.lat, S.player.lng));
+    var rangeMerc = CAPTURE_RANGE_M / Math.max(0.2, Math.cos((S.player.lat * Math.PI) / 180));
+    var rangeSq = rangeMerc * rangeMerc;
+
+    var i, ix, iy, key, dx, dy, left, top, mx, my, ddx, ddy;
+
+    // 1) 칸 격자선 (빈 칸)
+    if (showGrid) {
+      gctx.beginPath();
+      for (iy = v.dyFrom; iy <= v.dyTo; iy++) {
+        for (ix = v.dxFrom; ix <= v.dxTo; ix++) {
+          key = ix + '_' + iy;
+          if (S.cells[key]) continue;
+          dx = ix - v.cx;
+          dy = iy - v.cy;
+          left = v.base.x + dx * cw;
+          top = v.base.y + (dy + 1) * v.ch;
+          gctx.rect(left + 0.5, top + 0.5, cw - 1, chAbs - 1);
+        }
+      }
+      gctx.lineWidth = 1;
+      gctx.strokeStyle = 'rgba(16,32,54,0.17)';
+      gctx.stroke();
+    }
+
+    // 2) 점령 가능한 칸
+    if (showRange) {
+      gctx.beginPath();
+      var anyRange = false;
+      for (iy = v.dyFrom; iy <= v.dyTo; iy++) {
+        my = (iy + 0.5) * CELL_M - pm.y;
+        for (ix = v.dxFrom; ix <= v.dxTo; ix++) {
+          key = ix + '_' + iy;
+          if (S.cells[key]) continue;
+          mx = (ix + 0.5) * CELL_M - pm.x;
+          if (mx * mx + my * my > rangeSq) continue;
+          dx = ix - v.cx;
+          dy = iy - v.cy;
+          left = v.base.x + dx * cw;
+          top = v.base.y + (dy + 1) * v.ch;
+          gctx.rect(left + 1.2, top + 1.2, cw - 2.4, chAbs - 2.4);
+          anyRange = true;
+        }
+      }
+      if (anyRange) {
+        gctx.fillStyle = hexA(C.main, 0.13);
+        gctx.fill();
+        gctx.setLineDash([5, 4]);
+        gctx.lineWidth = 1.3;
+        gctx.strokeStyle = hexA(C.main, 0.55);
+        gctx.stroke();
+        gctx.setLineDash([]);
+      }
+    }
+
+    // 3) 점령한 칸
+    var anyCap = false;
+    gctx.beginPath();
+    for (iy = v.dyFrom; iy <= v.dyTo; iy++) {
+      for (ix = v.dxFrom; ix <= v.dxTo; ix++) {
+        if (!S.cells[ix + '_' + iy]) continue;
+        dx = ix - v.cx;
+        dy = iy - v.cy;
+        left = v.base.x + dx * cw;
+        top = v.base.y + (dy + 1) * v.ch;
+        gctx.rect(left + 0.8, top + 0.8, cw - 1.6, chAbs - 1.6);
+        anyCap = true;
+      }
+    }
+    if (anyCap) {
+      gctx.fillStyle = hexA(C.main, 0.62);
+      gctx.fill();
+      gctx.lineWidth = 1.4;
+      gctx.strokeStyle = hexA(C.dark, 0.9);
+      gctx.stroke();
+
+      if (cw >= 26) {
+        var bs = Math.min(cw * 0.26, 9);
+        gctx.beginPath();
+        for (iy = v.dyFrom; iy <= v.dyTo; iy++) {
+          for (ix = v.dxFrom; ix <= v.dxTo; ix++) {
+            if (!S.cells[ix + '_' + iy]) continue;
+            dx = ix - v.cx;
+            dy = iy - v.cy;
+            left = v.base.x + dx * cw;
+            top = v.base.y + (dy + 1) * v.ch;
+            gctx.moveTo(left + 2.4, top + 2.4 + bs);
+            gctx.lineTo(left + 2.4 + bs, top + 2.4);
+            gctx.lineTo(left + 2.4, top + 2.4);
+            gctx.closePath();
+          }
+        }
+        gctx.fillStyle = hexA(C.alt, 0.85);
+        gctx.fill();
+      }
+    }
+
+    // 4) 점령 범위 링
+    var pp = map.latLngToContainerPoint(S.player);
+    var pxPerM = cw / (CELL_M * Math.max(0.2, Math.cos((S.player.lat * Math.PI) / 180)));
+    gctx.beginPath();
+    gctx.arc(pp.x, pp.y, CAPTURE_RANGE_M * pxPerM, 0, Math.PI * 2);
+    gctx.setLineDash([2, 7]);
+    gctx.lineWidth = 1.4;
+    gctx.strokeStyle = hexA(C.main, 0.35);
+    gctx.stroke();
+    gctx.setLineDash([]);
+  }
+
+  function drawFx(now) {
+    if (!fxctx || !map) return;
+    var size = map.getSize();
+    if (!size || !size.x) return;
+    var W = size.x;
+    var H = size.y;
+    ensureCanvas(fxcanvas, fxctx, W, H);
+
+    var hasWork = S.drops.length > 0 || bursts.length > 0;
+    if (!hasWork) {
+      if (fxDirty) {
+        fxctx.clearRect(0, 0, W, H);
+        fxDirty = false;
+      }
+      return;
+    }
+
+    fxDirty = true;
+    fxctx.clearRect(0, 0, W, H);
+
+    var v = computeView();
+    if (!v) return;
+    var C = country();
+    var i, p, d, t;
+
+    // 코인 드롭
+    for (i = 0; i < S.drops.length; i++) {
+      d = S.drops[i];
+      p = cellScreen(v, d.ix, d.iy);
+      var rad = clamp(v.cw * 0.2, 6.5, 13);
+      var pulse = 1 + Math.sin(now / 300 + i) * 0.08;
+      var rr = rad * pulse;
+      fxctx.beginPath();
+      fxctx.arc(p.x, p.y + 1.5, rr * 1.05, 0, Math.PI * 2);
+      fxctx.fillStyle = 'rgba(20,14,0,0.24)';
+      fxctx.fill();
+      fxctx.beginPath();
+      fxctx.arc(p.x, p.y, rr, 0, Math.PI * 2);
+      fxctx.fillStyle = '#f7c948';
+      fxctx.fill();
+      fxctx.lineWidth = 1.6;
+      fxctx.strokeStyle = '#a9760a';
+      fxctx.stroke();
+      fxctx.beginPath();
+      fxctx.arc(p.x, p.y, rr * 0.62, 0, Math.PI * 2);
+      fxctx.strokeStyle = 'rgba(255,246,205,0.85)';
+      fxctx.lineWidth = 1.2;
+      fxctx.stroke();
+      if (rr >= 8) {
+        fxctx.fillStyle = '#6b4a00';
+        fxctx.font = '700 ' + Math.round(rr * 0.95) + 'px -apple-system, system-ui, sans-serif';
+        fxctx.textAlign = 'center';
+        fxctx.textBaseline = 'middle';
+        fxctx.fillText('2', p.x, p.y + 0.5);
+      }
+    }
+
+    // 점령 이펙트
+    for (i = bursts.length - 1; i >= 0; i--) {
+      t = (now - bursts[i].t0) / 560;
+      if (t >= 1 || t < 0) {
+        bursts.splice(i, 1);
+        continue;
+      }
+      p = cellScreen(v, bursts[i].ix, bursts[i].iy);
+      var e = 1 - Math.pow(1 - t, 2);
+      fxctx.beginPath();
+      fxctx.arc(p.x, p.y, v.cw * (0.18 + e * 0.55), 0, Math.PI * 2);
+      fxctx.strokeStyle = hexA(C.main, (1 - t) * 0.9);
+      fxctx.lineWidth = 3 * (1 - t) + 0.6;
+      fxctx.stroke();
+    }
+  }
+
+  // ---------------------------------------------------------------- HUD
   var toastTimer = null;
 
   function toast(msg, ms) {
@@ -327,448 +745,363 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function () {
       el.classList.remove('show');
-    }, ms || 2400);
+    }, ms || 2200);
   }
 
-  function celebrate(gain) {
-    var el = $('celebrate');
-    if (!el) return;
-    el.innerHTML =
-      '<div class="big">+' + fmtArea(gain) + '</div><div class="sub">점령 성공!</div>';
-    el.classList.remove('show');
-    void el.offsetWidth;
-    el.classList.add('show');
-    clearTimeout(el._t);
-    el._t = setTimeout(function () {
-      el.classList.remove('show');
-    }, 1750);
-  }
-
-  // ---------------------------------------------------------------- persistence
-  function save() {
-    try {
-      localStorage.setItem(
-        STORE_KEY,
-        JSON.stringify({
-          v: 1,
-          territory: S.territory,
-          home: S.home,
-          stats: { area: S.stats.area, captures: S.stats.captures },
-          mode: S.mode,
-          helpShown: S.helpShown,
-          savedAt: Date.now()
-        })
-      );
-    } catch (e) {}
-  }
-
-  function load() {
-    try {
-      var raw = localStorage.getItem(STORE_KEY);
-      if (!raw) return false;
-      var d = JSON.parse(raw);
-      if (!d || d.v !== 1) return false;
-      if (
-        d.territory &&
-        d.territory.geometry &&
-        (d.territory.geometry.type === 'Polygon' || d.territory.geometry.type === 'MultiPolygon')
-      ) {
-        S.territory = d.territory;
-      }
-      if (d.home && isFinite(d.home.lat) && isFinite(d.home.lng)) {
-        S.home = { lat: d.home.lat, lng: d.home.lng };
-      }
-      if (S.territory) S.stats.area = areaOf(S.territory);
-      S.stats.captures = d.stats && isFinite(d.stats.captures) ? d.stats.captures : 0;
-      S.mode = d.mode === 'test' ? 'test' : 'gps';
-      S.helpShown = !!d.helpShown;
-      return true;
-    } catch (e) {
-      return false;
+  function updateHud() {
+    var c = $('statCoins');
+    var k = $('statCells');
+    if (c) c.textContent = String(S.coins);
+    if (k) k.textContent = String(S.cellCount);
+    var fill = $('coinFill');
+    if (fill) {
+      fill.style.width = clamp((S.walkAccum / COIN_STEP_M) * 100, 0, 100).toFixed(1) + '%';
+    }
+    var lab = $('coinLabel');
+    if (lab) {
+      var left = Math.max(0, Math.ceil(COIN_STEP_M - S.walkAccum));
+      lab.textContent = left + 'm 더 걸으면 +1 코인';
     }
   }
 
-  // ---------------------------------------------------------------- base / reset
-  function ensureBase(c) {
-    S.home = { lat: c.lat, lng: c.lng };
-    S.territory = makeBase(c);
-    S.stats.area = areaOf(S.territory);
-    renderTerritory();
-    updateStats();
+  function updateNation() {
+    var C = country();
+    var root = document.documentElement;
+    root.style.setProperty('--nation', C.main);
+    root.style.setProperty('--nation-dark', C.dark);
+    root.style.setProperty('--nation-soft', hexA(C.main, 0.16));
+    var mini = $('charMini');
+    if (mini) mini.innerHTML = ballSVG(C.code, 'mini', 26);
+    var nm = $('charName');
+    if (nm) nm.textContent = C.name;
+  }
+
+  // ---------------------------------------------------------------- 코인
+  function gainCoins(n, msg) {
+    S.coins += n;
+    S.coinsEarned += n;
+    updateHud();
     save();
+    if (msg) toast(msg);
   }
 
-  function doReset() {
-    var c = S.player
-      ? { lat: S.player.lat, lng: S.player.lng }
-      : S.home || { lat: DEFAULT_CENTER.lat, lng: DEFAULT_CENTER.lng };
-    clearTrail();
-    clearWalkTarget();
-    S.territory = makeBase(c);
-    S.home = { lat: c.lat, lng: c.lng };
-    S.stats = { area: areaOf(S.territory), captures: 0 };
-    S.lastInside = { lat: c.lat, lng: c.lng };
-    renderTerritory();
-    updateStats();
+  function addDistance(d) {
+    if (!(d > 0)) return;
+    S.totalDist += d;
+    S.walkAccum += d;
+    var got = 0;
+    while (S.walkAccum >= COIN_STEP_M) {
+      S.walkAccum -= COIN_STEP_M;
+      S.coins += 1;
+      S.coinsEarned += 1;
+      got++;
+    }
+    if (got > 0) {
+      updateHud();
+      save();
+      toast('걸어서 +' + got + ' 코인 · 지금 ' + S.coins + '개');
+      haptic(10);
+    } else {
+      updateHud();
+    }
+  }
+
+  // ---------------------------------------------------------------- 드롭
+  function findDrop(key) {
+    for (var i = 0; i < S.drops.length; i++) {
+      if (S.drops[i].key === key) return S.drops[i];
+    }
+    return null;
+  }
+
+  function spawnDrop() {
+    if (S.drops.length >= DROP_MAX) return;
+    var pc = cellOf(S.player.lat, S.player.lng);
+    for (var t = 0; t < 48; t++) {
+      var ix = pc.ix + Math.round((Math.random() * 2 - 1) * 3);
+      var iy = pc.iy + Math.round((Math.random() * 2 - 1) * 3);
+      var key = ix + '_' + iy;
+      if (S.cells[key]) continue;
+      if (findDrop(key)) continue;
+      var c = cellCenter(ix, iy);
+      if (distM(S.player, c) > DROP_SPAWN_MAX_M) continue;
+      S.drops.push({ key: key, ix: ix, iy: iy, born: Date.now() });
+      return;
+    }
+  }
+
+  function collectDrop(drop) {
+    var idx = S.drops.indexOf(drop);
+    if (idx >= 0) S.drops.splice(idx, 1);
+    bursts.push({ ix: drop.ix, iy: drop.iy, t0: nowMs() });
+    haptic([8, 40, 12]);
+    gainCoins(DROP_VALUE, '+' + DROP_VALUE + ' 코인 획득!');
+  }
+
+  function pickupNearby() {
+    for (var i = S.drops.length - 1; i >= 0; i--) {
+      var d = S.drops[i];
+      var c = cellCenter(d.ix, d.iy);
+      if (distM(S.player, c) <= DROP_PICK_M) collectDrop(d);
+    }
+  }
+
+  function expireDrops() {
+    var now = Date.now();
+    for (var i = S.drops.length - 1; i >= 0; i--) {
+      if (now - S.drops[i].born > DROP_LIFE_MS) S.drops.splice(i, 1);
+    }
+  }
+
+  // ---------------------------------------------------------------- 점령
+  function captureCell(cell) {
+    var key = cell.key;
+    if (S.cells[key]) return;
+    if (S.coins < 1) return;
+    S.cells[key] = Date.now();
+    S.cellCount += 1;
+    S.captures += 1;
+    S.coins -= 1;
+    bursts.push({ ix: cell.ix, iy: cell.iy, t0: nowMs() });
+    haptic(16);
+    updateHud();
     save();
-    if (map) map.setView([c.lat, c.lng], Math.max(map.getZoom(), 17));
-    toast('새 기지를 만들었어요', 2200);
+    requestDraw();
+    toast('점령 성공! 칸 +1 · 코인 ' + S.coins + '개 남음', 1500);
   }
 
-  // ---------------------------------------------------------------- capture flow
-  function beginTrail(p) {
-    S.trailActive = true;
-    S.trailDistance = 0;
-    S.insideStreak = 0;
-    S.trail = [];
-    var start = S.lastInside;
-    // 오래 전 위치에서 시작하면 지도에 긴 선이 그려지므로 가까운 경우에만 연결
-    if (start && dist(start, p) <= 120) S.trail.push({ lat: start.lat, lng: start.lng });
-    S.trail.push({ lat: p.lat, lng: p.lng });
-    drawTrail();
-    haptic(8);
-  }
-
-  function simplifyTrail() {
-    try {
-      var line = turf.lineString(
-        S.trail.map(function (p) {
-          return [p.lng, p.lat];
-        })
-      );
-      var simp = turf.simplify(line, { tolerance: 0.00002, highQuality: false, mutate: false });
-      S.trail = simp.geometry.coordinates.map(function (c) {
-        return { lat: c[1], lng: c[0] };
-      });
-    } catch (e) {}
-  }
-
-  function closeLoop(entry) {
-    var pts = S.trail.slice();
-    pts.push({ lat: entry.lat, lng: entry.lng });
-    var before = areaOf(S.territory);
-    var result = buildCapture(pts);
-    clearTrail();
-    S.lastInside = { lat: entry.lat, lng: entry.lng };
-
-    if (!result) {
-      toast('궤적을 알아보지 못했어요. 더 크게 돌아보세요', 2600);
+  function onCellTap(cell) {
+    var drop = findDrop(cell.key);
+    if (drop) {
+      collectDrop(drop);
       return;
     }
-    var gain = result.area - before;
-    if (gain < MIN_CAPTURE_M2) {
-      toast('조금만 더 넓게 돌아보세요', 2200);
+    if (S.cells[cell.key]) {
+      toast('이미 점령한 칸이에요', 1200);
       return;
     }
-    S.territory = result.feature;
-    S.stats.area = areaOf(S.territory);
-    S.stats.captures += 1;
-    renderTerritory();
-    updateStats();
-    save();
-    celebrate(gain);
-    haptic([14, 45, 20]);
-  }
-
-  function advanceTrail(p, inside, isTest) {
-    var minMove = isTest ? TEST_MIN_MOVE : GPS_MIN_MOVE;
-    var head = S.trail[S.trail.length - 1];
-    var d = head ? dist(head, p) : 0;
-    if (d >= minMove) {
-      S.trail.push({ lat: p.lat, lng: p.lng });
-      S.trailDistance += d;
-      if (S.trail.length > MAX_TRAIL_POINTS) simplifyTrail();
-    }
-
-    if (inside) {
-      S.insideStreak += 1;
-      var needStreak = isTest ? 1 : 2;
-      var minDist = isTest ? 4 : 8;
-      if (S.insideStreak >= needStreak) {
-        if (S.trailDistance >= minDist && S.trail.length >= 3) {
-          closeLoop(p);
-          return;
-        }
-        if (S.trailDistance < minDist) {
-          clearTrail();
-          S.lastInside = { lat: p.lat, lng: p.lng };
-          toast('영역 밖으로 조금 더 나가 보세요', 2000);
-          return;
-        }
-      }
-    } else {
-      S.insideStreak = 0;
-    }
-    drawTrail();
-  }
-
-  function setPlayer(p, opts) {
-    opts = opts || {};
-    var prev = S.player;
-    S.player = { lat: p.lat, lng: p.lng, acc: p.acc || 0 };
-
-    if (!playerMarker) {
-      playerMarker = Lmap.marker([p.lat, p.lng], {
-        icon: playerIcon,
-        interactive: false,
-        keyboard: false,
-        zIndexOffset: 900
-      }).addTo(map);
-    } else {
-      playerMarker.setLatLng([p.lat, p.lng]);
-    }
-
-    if (map && S.follow) {
-      if (!prev) {
-        map.setView([p.lat, p.lng], Math.max(map.getZoom(), 16));
-      } else if (typeof map.panInside === 'function') {
-        map.panInside(Lmap.latLng(p.lat, p.lng), {
-          padding: [70, 70],
-          animate: true,
-          duration: 0.4
-        });
-      }
-    }
-
-    if (!S.territory) {
-      ensureBase({ lat: p.lat, lng: p.lng });
-      S.lastInside = { lat: p.lat, lng: p.lng };
-      return;
-    }
-
-    var inside = pointInTerritory(S.player);
-
-    // 영역에서 아주 멀리 떨어져 있으면 궤적을 만들지 않고 안내만 한다
-    if (!inside && S.lastInside && dist(S.lastInside, p) > 250) {
-      if (S.trailActive) clearTrail();
-      if (!S.farHintShown) {
-        S.farHintShown = true;
-        toast('내 영역에서 멀리 있어요 · 초기화로 지금 위치에 새 기지를 만들 수 있어요', 4200);
+    var c = cellCenter(cell.ix, cell.iy);
+    var d = distM(S.player, c);
+    if (d > CAPTURE_RANGE_M) {
+      if (S.mode === 'test') {
+        walkTarget = { lat: c.lat, lng: c.lng };
+        setTargetMarker(walkTarget);
+        toast('점령 범위(200m) 밖이에요 · 그쪽으로 걸어갈게요', 1900);
+      } else {
+        toast('점령 범위(200m) 밖이에요 · 가까이 이동해 주세요', 1900);
       }
       return;
     }
-    if (inside) S.farHintShown = false;
+    if (S.coins < 1) {
+      toast('점령 코인이 없어요 · 40m 걸으면 +1', 2000);
+      return;
+    }
+    captureCell(cell);
+  }
 
-    if (S.trailActive) {
-      advanceTrail(S.player, inside, !!opts.test);
-    } else if (!inside) {
-      beginTrail(S.player);
+  // ---------------------------------------------------------------- 플레이어
+  var pendMove = 0;
+
+  function applyPlayer(p, minMove) {
+    if (!p || !isFinite(p.lat) || !isFinite(p.lng)) return;
+    var d = distM(S.player, p);
+    if (d <= 0.00001) return;
+    if (d > 200) {
+      pendMove = 0; // 텔레포트(최초 GPS 고정 등)는 거리 적립에서 제외
     } else {
-      S.lastInside = { lat: p.lat, lng: p.lng };
-    }
-  }
-
-  // ---------------------------------------------------------------- test walking
-  function moveByMeters(dx, dy) {
-    if (!S.player) return;
-    var lat = S.player.lat + dy / 111320;
-    var lng =
-      S.player.lng + dx / (111320 * Math.cos((S.player.lat * Math.PI) / 180) || 1);
-    setPlayer({ lat: lat, lng: lng, acc: 0 }, { test: true });
-  }
-
-  function stepToward(target, metersStep) {
-    if (!S.player || !target) return;
-    var d = dist(S.player, target);
-    if (d < 0.02) {
-      setPlayer({ lat: target.lat, lng: target.lng, acc: 0 }, { test: true });
-      return;
-    }
-    var f = Math.min(1, metersStep / d);
-    setPlayer(
-      {
-        lat: S.player.lat + (target.lat - S.player.lat) * f,
-        lng: S.player.lng + (target.lng - S.player.lng) * f,
-        acc: 0
-      },
-      { test: true }
-    );
-  }
-
-  function ensureWalkLoop() {
-    if (S.raf != null) return;
-    S.lastT = performance.now();
-    S.raf = requestAnimationFrame(walkTick);
-  }
-
-  function walkTick(t) {
-    S.raf = null;
-    var dt = clamp((t - S.lastT) / 1000, 0, 0.08);
-    S.lastT = t;
-    if (S.mode !== 'test' || !S.player) return;
-
-    var vx = S.dpad.x;
-    var vy = S.dpad.y;
-    if (vx || vy) {
-      var len = Math.sqrt(vx * vx + vy * vy) || 1;
-      clearWalkTarget();
-      moveByMeters((vx / len) * TEST_SPEED * dt, (vy / len) * TEST_SPEED * dt);
-      ensureWalkLoop();
-      return;
-    }
-    if (S.walkTarget) {
-      var d = dist(S.player, S.walkTarget);
-      if (d <= 0.6) {
-        clearWalkTarget();
-        return;
+      pendMove += d;
+      if (pendMove >= (minMove || 0)) {
+        addDistance(pendMove);
+        pendMove = 0;
       }
-      stepToward(S.walkTarget, Math.min(TEST_SPEED * dt, d));
-      ensureWalkLoop();
+    }
+    S.player = { lat: p.lat, lng: p.lng };
+    if (playerMarker) playerMarker.setLatLng(S.player);
+    if (S.follow) keepInView();
+    pickupNearby();
+    requestDraw();
+    if (Date.now() - lastSave > 3000) {
+      lastSave = Date.now();
+      save();
     }
   }
 
-  function setWalkTarget(latlng) {
-    S.walkTarget = { lat: latlng.lat, lng: latlng.lng };
-    if (!targetMarker) {
-      targetMarker = Lmap.marker([latlng.lat, latlng.lng], {
-        icon: targetIcon,
-        interactive: false,
-        keyboard: false,
-        zIndexOffset: 850
-      }).addTo(map);
-    } else {
-      targetMarker.setLatLng([latlng.lat, latlng.lng]);
-    }
-    S.dpad.x = 0;
-    S.dpad.y = 0;
-    setPadActive(null);
-    ensureWalkLoop();
-  }
-
-  function clearWalkTarget() {
-    S.walkTarget = null;
-    if (targetMarker) {
-      map.removeLayer(targetMarker);
-      targetMarker = null;
+  function keepInView() {
+    if (!map) return;
+    var t = Date.now();
+    if (t - lastPan < 650) return;
+    var size = map.getSize();
+    var pt = map.latLngToContainerPoint(S.player);
+    var m = Math.min(size.x, size.y) * 0.26;
+    if (pt.x < m || pt.y < m || pt.x > size.x - m || pt.y > size.y - m) {
+      lastPan = t;
+      map.panTo(S.player, { animate: true, duration: 0.3 });
     }
   }
 
-  var padActiveEl = null;
-
-  function setPadActive(el) {
-    if (padActiveEl && padActiveEl !== el) padActiveEl.classList.remove('active');
-    padActiveEl = el;
-    if (el) el.classList.add('active');
+  function moveBy(dxM, dyM) {
+    var lat = S.player.lat;
+    var lng = S.player.lng;
+    var dLat = dyM / 111320;
+    var dLng = dxM / (111320 * Math.cos((lat * Math.PI) / 180));
+    applyPlayer({ lat: lat + dLat, lng: lng + dLng }, 0);
   }
 
-  // ---------------------------------------------------------------- gps
-  function updateAccChip(acc) {
-    var el = $('accChip');
-    if (!el) return;
-    if (!isFinite(acc) || acc <= 0) {
-      el.hidden = true;
-      return;
-    }
-    var v = $('accVal');
-    if (v) v.textContent = Math.round(acc);
-    el.hidden = acc <= 18;
-    el.classList.toggle('warn', acc > 35);
-  }
-
-  function onFix(pos) {
-    var c = pos.coords;
-    var acc = isFinite(c.accuracy) ? c.accuracy : 60;
-    updateAccChip(acc);
-    var raw = { lat: c.latitude, lng: c.longitude };
-
-    if (!S.player) {
-      S.follow = true;
-      setPlayer({ lat: raw.lat, lng: raw.lng, acc: acc }, { test: false });
-      return;
-    }
-    if (S.mode !== 'gps') return;
-    if (acc > GPS_MAX_ACC) return;
-    var d = dist(S.player, raw);
-    if (d < GPS_MIN_MOVE) return;
-    var alpha = acc <= 12 ? 0.8 : acc <= 25 ? 0.5 : 0.3;
-    setPlayer(
-      {
-        lat: S.player.lat + (raw.lat - S.player.lat) * alpha,
-        lng: S.player.lng + (raw.lng - S.player.lng) * alpha,
-        acc: acc
-      },
-      { test: false }
-    );
-  }
-
-  function onGeoError(err) {
-    if (S.mode !== 'gps') return;
-    if (err && err.code === 1) {
-      toast('위치 권한이 꺼져 있어요 · 테스트 패드로도 놀 수 있어요', 4200);
-    } else {
-      toast('위치를 확인하는 중이에요…', 2600);
-    }
-  }
-
+  // ---------------------------------------------------------------- GPS
   function startGps() {
     if (!navigator.geolocation) {
-      toast('이 브라우저에서는 GPS를 쓸 수 없어요', 3000);
+      toast('이 브라우저에서는 GPS를 쓸 수 없어요', 2400);
+      setMode('test', true);
       return;
     }
-    if (S.watchId != null) return;
+    if (watchId != null) return;
     try {
-      S.watchId = navigator.geolocation.watchPosition(onFix, onGeoError, {
+      watchId = navigator.geolocation.watchPosition(onGps, onGpsErr, {
         enableHighAccuracy: true,
-        maximumAge: 0,
+        maximumAge: 4000,
         timeout: 20000
       });
     } catch (e) {
-      toast('GPS를 시작하지 못했어요', 3000);
+      watchId = null;
     }
   }
 
   function stopGps() {
-    if (S.watchId != null) {
+    if (watchId != null) {
       try {
-        navigator.geolocation.clearWatch(S.watchId);
+        navigator.geolocation.clearWatch(watchId);
       } catch (e) {}
-      S.watchId = null;
+      watchId = null;
     }
   }
 
-  // ---------------------------------------------------------------- mode / ui
-  function updateModeUi() {
-    var btn = $('modeBtn');
-    var label = $('modeLabel');
-    var dpad = $('dpad');
-    var isTest = S.mode === 'test';
-    if (label) label.textContent = isTest ? '테스트 패드' : 'GPS 모드';
-    if (btn) {
-      btn.classList.toggle('test', isTest);
-      btn.setAttribute('aria-pressed', isTest ? 'true' : 'false');
-    }
-    if (dpad) dpad.hidden = !isTest;
-  }
-
-  function setMode(next, opts) {
-    opts = opts || {};
-    if (next === S.mode && !opts.force) {
-      updateModeUi();
+  function onGps(pos) {
+    if (!pos || !pos.coords) return;
+    var acc = pos.coords.accuracy || 999;
+    S.gpsAcc = acc;
+    var p = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    if (!S.gpsGot) {
+      S.gpsGot = true;
+      S.player = p;
+      if (playerMarker) playerMarker.setLatLng(p);
+      S.follow = true;
+      map.setView(p, map.getZoom());
+      save();
+      requestDraw();
+      if (acc > 60) toast('GPS 정확도 ±' + Math.round(acc) + 'm · 실내면 테스트 패드를 쓰세요', 2600);
       return;
     }
-    S.mode = next;
-    if (next === 'gps') {
-      setPadActive(null);
-      S.dpad.x = 0;
-      S.dpad.y = 0;
-      clearWalkTarget();
-      startGps();
-      toast('GPS 모드 · 실제 위치로 이동해요', 2400);
-    } else {
-      stopGps();
-      clearWalkTarget();
-      if (!S.player) {
-        var c = S.home || (S.territory ? centroidOf(S.territory) : DEFAULT_CENTER);
-        S.follow = true;
-        setPlayer({ lat: c.lat, lng: c.lng, acc: 0 }, { test: true });
-        if (map) map.setView([c.lat, c.lng], ZOOM_DEFAULT);
-      }
-      toast('테스트 패드 · 지도를 눌러 이동해 보세요', 3200);
-    }
-    updateModeUi();
-    save();
+    if (acc > 90) return; // 너무 부정확한 측정은 무시
+    if (S.mode !== 'gps') return;
+    applyPlayer(p, 1.2);
   }
 
+  function onGpsErr(err) {
+    var code = err && err.code;
+    if (code === 1) {
+      toast('위치 권한이 필요해요 · 테스트 패드로 시작할게요', 3000);
+      setMode('test', true);
+    } else {
+      toast('위치를 찾는 중이에요 · 실내면 테스트 패드를 쓰세요', 2600);
+    }
+  }
+
+  // ---------------------------------------------------------------- 모드
+  function setMode(mode, silent) {
+    S.mode = mode === 'test' ? 'test' : 'gps';
+    var test = S.mode === 'test';
+    var btn = $('modeBtn');
+    if (btn) btn.setAttribute('aria-pressed', test ? 'true' : 'false');
+    var lab = $('modeLabel');
+    if (lab) lab.textContent = test ? '테스트 패드' : 'GPS 모드';
+    var pad = $('dpad');
+    if (pad) pad.hidden = !test;
+
+    if (test) {
+      stopGps();
+    } else {
+      walkTarget = null;
+      clearTargetMarker();
+      startGps();
+    }
+    save();
+    requestDraw();
+    if (!silent) {
+      toast(test ? '테스트 패드 · 방향키나 탭으로 이동해요' : 'GPS 모드 · 실제 위치를 따라가요');
+    }
+  }
+
+  // ---------------------------------------------------------------- 루프
+  function testStep(dt) {
+    if (S.mode !== 'test') return;
+    if (dpad.x || dpad.y) {
+      if (walkTarget) {
+        walkTarget = null;
+        clearTargetMarker();
+      }
+      var len = Math.sqrt(dpad.x * dpad.x + dpad.y * dpad.y) || 1;
+      moveBy((dpad.x / len) * TEST_SPEED * dt, (dpad.y / len) * TEST_SPEED * dt);
+      return;
+    }
+    if (walkTarget) {
+      var d = distM(S.player, walkTarget);
+      if (d < 4) {
+        walkTarget = null;
+        clearTargetMarker();
+      } else {
+        var step = Math.min(WALK_SPEED * dt, d);
+        var t = step / d;
+        applyPlayer(
+          {
+            lat: S.player.lat + (walkTarget.lat - S.player.lat) * t,
+            lng: S.player.lng + (walkTarget.lng - S.player.lng) * t
+          },
+          0
+        );
+      }
+    }
+  }
+
+  function loop(now) {
+    var dt = lastTick ? Math.min((now - lastTick) / 1000, 0.12) : 0;
+    lastTick = now;
+    testStep(dt);
+    drawFx(now);
+    window.requestAnimationFrame(loop);
+  }
+
+  // ---------------------------------------------------------------- 캐릭터
+  function renderCharGrid() {
+    var wrap = $('charGrid');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    COUNTRIES.forEach(function (c, i) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'char-item' + (c.code === S.country ? ' on' : '');
+      b.innerHTML =
+        '<span class="char-ball">' + ballSVG(c.code, 'sel' + i, 48) + '</span>' +
+        '<span class="char-name">' + c.name + '</span>';
+      b.addEventListener('click', function () {
+        pickCountry(c.code);
+      });
+      wrap.appendChild(b);
+    });
+  }
+
+  function pickCountry(code) {
+    S.country = code;
+    save();
+    updateNation();
+    renderCharGrid();
+    if (playerMarker) playerMarker.setIcon(makeBallIcon(64));
+    requestDraw();
+    hideSheet('charSheet');
+    toast(country().name + ' 볼로 점령해요!', 1600);
+    haptic(12);
+  }
+
+  // ---------------------------------------------------------------- 시트
   function showSheet(id) {
     var el = $(id);
     if (el) el.hidden = false;
@@ -779,56 +1112,28 @@
     if (el) el.hidden = true;
   }
 
-  // ---------------------------------------------------------------- init
-  function initDpad() {
-    var pad = $('dpad');
-    if (!pad) return;
-
-    function release() {
-      if (!S.dpad.x && !S.dpad.y) {
-        setPadActive(null);
-        return;
-      }
-      S.dpad.x = 0;
-      S.dpad.y = 0;
-      setPadActive(null);
-    }
-
-    pad.addEventListener('pointerdown', function (ev) {
-      var btn = ev.target && ev.target.closest ? ev.target.closest('.pad-btn') : null;
-      if (!btn) return;
-      ev.preventDefault();
-      if (btn.id === 'padStop') {
-        release();
-        clearWalkTarget();
-        return;
-      }
-      var dx = parseFloat(btn.getAttribute('data-dx'));
-      var dy = parseFloat(btn.getAttribute('data-dy'));
-      if (!isFinite(dx) || !isFinite(dy)) return;
-      S.dpad.x = dx;
-      S.dpad.y = dy;
-      setPadActive(btn);
-      if (S.walkTarget) clearWalkTarget();
-      ensureWalkLoop();
-      try {
-        btn.setPointerCapture(ev.pointerId);
-      } catch (e) {}
-    });
-
-    pad.addEventListener('lostpointercapture', release);
-    pad.addEventListener('pointercancel', release);
-    window.addEventListener('pointerup', release);
-    window.addEventListener('blur', release);
+  function resetGame() {
+    S.cells = {};
+    S.cellCount = 0;
+    S.coins = START_COINS;
+    S.captures = 0;
+    S.coinsEarned = 0;
+    S.walkAccum = 0;
+    S.totalDist = 0;
+    S.drops = [];
+    bursts = [];
+    S.lastRecharge = Date.now();
+    walkTarget = null;
+    clearTargetMarker();
+    save();
+    updateHud();
+    requestDraw();
+    hideSheet('resetSheet');
+    toast('새로 시작! 코인 ' + START_COINS + '개로 다시 모아요');
   }
 
-  function onMapClick(e) {
-    if (S.mode !== 'test') return;
-    if (!S.player) return;
-    setWalkTarget(e.latlng);
-  }
-
-  function bindUi() {
+  // ---------------------------------------------------------------- 이벤트
+  function bind() {
     var modeBtn = $('modeBtn');
     if (modeBtn) {
       modeBtn.addEventListener('click', function () {
@@ -836,16 +1141,38 @@
       });
     }
 
+    var charBtn = $('charBtn');
+    if (charBtn) {
+      charBtn.addEventListener('click', function () {
+        renderCharGrid();
+        showSheet('charSheet');
+      });
+    }
+
+    var helpBtn = $('helpBtn');
+    if (helpBtn) {
+      helpBtn.addEventListener('click', function () {
+        showSheet('helpSheet');
+      });
+    }
+
+    var helpClose = $('helpClose');
+    if (helpClose) {
+      helpClose.addEventListener('click', function () {
+        hideSheet('helpSheet');
+        S.helpShown = true;
+        save();
+      });
+    }
+
     var locateBtn = $('locateBtn');
     if (locateBtn) {
       locateBtn.addEventListener('click', function () {
         S.follow = true;
-        if (S.player && map) {
-          map.setView([S.player.lat, S.player.lng], Math.max(map.getZoom(), 17));
-        } else {
-          toast('위치를 아직 찾지 못했어요', 2200);
-        }
-        haptic(6);
+        if (S.mode === 'gps' && watchId == null) startGps();
+        if (map) map.setView(S.player, Math.max(map.getZoom(), DEFAULT_ZOOM), { animate: true });
+        requestDraw();
+        toast('내 위치로 이동');
       });
     }
 
@@ -862,181 +1189,123 @@
       });
     }
     var resetConfirm = $('resetConfirm');
-    if (resetConfirm) {
-      resetConfirm.addEventListener('click', function () {
-        hideSheet('resetSheet');
-        doReset();
+    if (resetConfirm) resetConfirm.addEventListener('click', resetGame);
+
+    document.querySelectorAll('[data-close]').forEach(function (el) {
+      el.addEventListener('click', function () {
+        hideSheet(el.getAttribute('data-close'));
+      });
+    });
+
+    document.querySelectorAll('.sheet').forEach(function (sheet) {
+      sheet.addEventListener('click', function (e) {
+        if (e.target === sheet) sheet.hidden = true;
+      });
+    });
+
+    // D-pad
+    document.querySelectorAll('.pad-btn[data-dx]').forEach(function (btn) {
+      var dx = parseInt(btn.getAttribute('data-dx'), 10) || 0;
+      var dy = parseInt(btn.getAttribute('data-dy'), 10) || 0;
+      var press = function (e) {
+        if (e && e.cancelable) e.preventDefault();
+        dpad.x = dx;
+        dpad.y = dy;
+        btn.classList.add('held');
+        try {
+          if (btn.setPointerCapture && e && e.pointerId != null) btn.setPointerCapture(e.pointerId);
+        } catch (err) {}
+      };
+      var release = function () {
+        if (dpad.x === dx && dpad.y === dy) {
+          dpad.x = 0;
+          dpad.y = 0;
+        }
+        btn.classList.remove('held');
+      };
+      btn.addEventListener('pointerdown', press, { passive: false });
+      btn.addEventListener('pointerup', release);
+      btn.addEventListener('pointercancel', release);
+      btn.addEventListener('pointerleave', release);
+      btn.addEventListener('contextmenu', function (e) {
+        e.preventDefault();
+      });
+    });
+
+    var padStop = $('padStop');
+    if (padStop) {
+      padStop.addEventListener('click', function () {
+        dpad.x = 0;
+        dpad.y = 0;
+        walkTarget = null;
+        clearTargetMarker();
+        document.querySelectorAll('.pad-btn.held').forEach(function (b) {
+          b.classList.remove('held');
+        });
       });
     }
-    var helpClose = $('helpClose');
-    if (helpClose) {
-      helpClose.addEventListener('click', function () {
-        hideSheet('helpSheet');
-        S.helpShown = true;
-        save();
+
+    window.addEventListener('pointerup', function () {
+      dpad.x = 0;
+      dpad.y = 0;
+      document.querySelectorAll('.pad-btn.held').forEach(function (b) {
+        b.classList.remove('held');
       });
-    }
-  }
-
-  function initMap() {
-    map = Lmap.map('map', {
-      zoomControl: false,
-      attributionControl: false,
-      preferCanvas: true,
-      minZoom: 3,
-      maxZoom: 20,
-      zoomSnap: 0.5,
-      tap: false
     });
 
-    var start = S.home || (S.territory ? centroidOf(S.territory) : DEFAULT_CENTER);
-    map.setView([start.lat, start.lng], ZOOM_DEFAULT);
-
-    Lmap.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution:
-        '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>'
-    }).addTo(map);
-
-    Lmap.control.attribution({ position: 'bottomleft', prefix: false }).addTo(map);
-
-    territoryLayer = Lmap.layerGroup().addTo(map);
-
-    previewPoly = Lmap.polygon([], {
-      interactive: false,
-      color: '#22d3ee',
-      weight: 2,
-      opacity: 0.55,
-      dashArray: '5 7',
-      fillColor: '#22d3ee',
-      fillOpacity: 0.12
-    }).addTo(map);
-
-    trailGlow = Lmap.polyline([], {
-      interactive: false,
-      color: '#22d3ee',
-      weight: 16,
-      opacity: 0.16,
-      lineCap: 'round',
-      lineJoin: 'round'
-    }).addTo(map);
-
-    trailLine = Lmap.polyline([], {
-      interactive: false,
-      color: '#9df5ff',
-      weight: 4,
-      opacity: 1,
-      dashArray: '9 9',
-      lineCap: 'round',
-      lineJoin: 'round'
-    }).addTo(map);
-
-    map.on('dragstart', function () {
-      S.follow = false;
-    });
-    map.on('click', onMapClick);
-
-    playerIcon = Lmap.divIcon({
-      className: 'player-icon',
-      html: '<div class="me"><span class="me-pulse"></span><span class="me-dot"></span></div>',
-      iconSize: [46, 46],
-      iconAnchor: [23, 23]
+    window.addEventListener('blur', function () {
+      dpad.x = 0;
+      dpad.y = 0;
+      save();
     });
 
-    targetIcon = Lmap.divIcon({
-      className: 'target-icon',
-      html: '<div class="target"></div>',
-      iconSize: [30, 30],
-      iconAnchor: [15, 15]
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) save();
+    });
+
+    window.addEventListener('resize', function () {
+      requestDraw();
     });
   }
 
+  // ---------------------------------------------------------------- 시작
   function boot() {
-    if (!Lmap || !turf) {
-      var m = $('map');
-      if (m) {
-        m.innerHTML =
-          '<div style="padding:24px;font:600 14px/1.6 -apple-system,sans-serif;color:#eaf2ff">' +
-          '지도 라이브러리를 불러오지 못했어요. 인터넷 연결을 확인한 뒤 새로고침해 주세요.</div>';
-      }
-      return;
-    }
-
     load();
     initMap();
-    renderTerritory();
-    updateStats();
-    updateModeUi();
-    initDpad();
-    bindUi();
+    updateNation();
+    updateHud();
+    bind();
 
-    if (S.home) S.lastInside = { lat: S.home.lat, lng: S.home.lng };
-
-    if (S.mode === 'test') {
-      var c =
-        S.player || S.home || (S.territory ? centroidOf(S.territory) : DEFAULT_CENTER);
-      S.follow = true;
-      setPlayer({ lat: c.lat, lng: c.lng, acc: 0 }, { test: true });
-      map.setView([c.lat, c.lng], ZOOM_DEFAULT);
-    } else {
-      startGps();
-    }
+    setMode(S.mode, true);
 
     if (!S.helpShown) showSheet('helpSheet');
 
-    window.addEventListener('pagehide', save);
-    document.addEventListener('visibilitychange', function () {
-      if (document.visibilityState === 'hidden') save();
-    });
+    spawnDrop();
+    spawnDrop();
 
-    if (/(\?|&)debug=1/.test(window.location.search)) {
-      window.geoDebug = {
-        state: function () {
-          return {
-            territory: S.territory,
-            stats: S.stats,
-            mode: S.mode,
-            player: S.player,
-            trailActive: S.trailActive,
-            trailLen: S.trail.length,
-            trailDistance: S.trailDistance
-          };
-        },
-        tp: function (lat, lng) {
-          setPlayer({ lat: lat, lng: lng, acc: 0 }, { test: true });
-          return S.stats;
-        },
-        path: function (pts) {
-          for (var i = 0; i < pts.length - 1; i++) {
-            var a = { lat: pts[i][0], lng: pts[i][1] };
-            var b = { lat: pts[i + 1][0], lng: pts[i + 1][1] };
-            var d = dist(a, b);
-            var n = Math.max(1, Math.ceil(d / 1.5));
-            for (var k = 1; k <= n; k++) {
-              var f = k / n;
-              setPlayer(
-                {
-                  lat: a.lat + (b.lat - a.lat) * f,
-                  lng: a.lng + (b.lng - a.lng) * f,
-                  acc: 0
-                },
-                { test: true }
-              );
-            }
-          }
-          return { area: S.stats.area, captures: S.stats.captures };
-        },
-        mode: function (m) {
-          setMode(m, { force: true });
-        },
-        reset: doReset,
-        closeHelp: function () {
-          hideSheet('helpSheet');
-          S.helpShown = true;
-          save();
-        }
-      };
-    }
+    setInterval(function () {
+      var now = Date.now();
+      if (S.coins >= PASSIVE_MAX) {
+        S.lastRecharge = now;
+        return;
+      }
+      if (now - S.lastRecharge >= PASSIVE_MS) {
+        S.lastRecharge = now;
+        gainCoins(1, '코인 자동 회복 +1');
+      }
+    }, 1000);
+
+    setInterval(function () {
+      spawnDrop();
+      expireDrops();
+    }, DROP_SPAWN_MS);
+
+    setInterval(function () {
+      updateHud();
+    }, 1000);
+
+    window.requestAnimationFrame(loop);
+    requestDraw();
   }
 
   if (document.readyState === 'loading') {
