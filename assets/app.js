@@ -268,6 +268,7 @@
   var gctx = null;
   var fxcanvas = null;
   var fxctx = null;
+  var DBG = null;
   var playerMarker = null;
   var targetMarker = null;
   var watchId = null;
@@ -543,6 +544,11 @@
     gctx.clearRect(0, 0, W, H);
 
     var v = computeView();
+    if (DBG) {
+      DBG.view = v;
+      DBG.size = [W, H];
+      DBG.lastDraw = Date.now();
+    }
     if (!v) return;
 
     var C = country();
@@ -550,6 +556,10 @@
     var chAbs = -v.ch;
     var showGrid = cw >= 17 && v.count <= MAX_GRID_CELLS;
     var showRange = cw >= 10;
+    if (DBG) {
+      DBG.showGrid = showGrid;
+      DBG.showRange = showRange;
+    }
 
     var pm = CRS.project(Lm.latLng(S.player.lat, S.player.lng));
     var rangeMerc = CAPTURE_RANGE_M / Math.max(0.2, Math.cos((S.player.lat * Math.PI) / 180));
@@ -1272,6 +1282,16 @@
   function boot() {
     load();
     initMap();
+    if (/(^|[?&])debug=1/.test(location.search)) {
+      window.pb = DBG = {
+        S: S,
+        view: computeView,
+        draw: drawGrid,
+        map: function () {
+          return map;
+        }
+      };
+    }
     updateNation();
     updateHud();
     bind();
