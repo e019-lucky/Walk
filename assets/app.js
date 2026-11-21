@@ -518,13 +518,15 @@
       playerMarker.setLatLng([p.lat, p.lng]);
     }
 
-    if (S.follow && map) {
-      var c = map.getCenter();
-      var size = map.getSize();
-      var edge = map.distance(c, map.containerPointToLatLng([size.x, size.y]));
-      var d = map.distance(c, Lmap.latLng(p.lat, p.lng));
-      if (!prev || d > edge * 0.35) {
-        map.panTo([p.lat, p.lng], { animate: !!prev, duration: 0.5 });
+    if (map && S.follow) {
+      if (!prev) {
+        map.setView([p.lat, p.lng], Math.max(map.getZoom(), 16));
+      } else if (typeof map.panInside === 'function') {
+        map.panInside(Lmap.latLng(p.lat, p.lng), {
+          padding: [70, 70],
+          animate: true,
+          duration: 0.4
+        });
       }
     }
 
@@ -672,7 +674,6 @@
     if (!S.player) {
       S.follow = true;
       setPlayer({ lat: raw.lat, lng: raw.lng, acc: acc }, { test: false });
-      if (map) map.setView([raw.lat, raw.lng], Math.max(map.getZoom(), 17));
       return;
     }
     if (S.mode !== 'gps') return;

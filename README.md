@@ -5,7 +5,7 @@ GPS로 이동하면 이동 궤적이 그려지고, 다시 내 영역 안으로 �
 
 ## 바로 플레이
 
-https://e019-lucky.github.io/geo-paper-io/
+https://e019-lucky.github.io/walk/
 
 휴대폰 브라우저에서 열고, 위치 권한을 허용한 뒤 걸어다니면 됩니다.
 실내에서는 화면 오른쪽 위 **GPS 모드** 버튼을 눌러 **테스트 패드**로 바꾸면

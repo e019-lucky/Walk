@@ -187,8 +187,9 @@ button {
 .acc-chip {
   position: fixed;
   z-index: 600;
-  top: calc(var(--safe-t) + 60px);
-  left: calc(var(--safe-l) + 11px);
+  top: calc(var(--safe-t) + 56px);
+  right: calc(var(--safe-r) + 11px);
+  left: auto;
   padding: 4px 9px;
   border-radius: 999px;
   background: rgba(9, 14, 24, 0.7);
@@ -317,7 +318,7 @@ button {
   position: fixed;
   z-index: 800;
   left: 50%;
-  top: calc(var(--safe-t) + 66px);
+  top: calc(var(--safe-t) + 94px);
   transform: translate(-50%, -10px);
   max-width: calc(100vw - 28px);
   padding: 9px 15px;
