@@ -5,6 +5,13 @@
   'use strict';
 
   var Lm = window.L;
+  var ERRS = [];
+  window.addEventListener('error', function (e) {
+    ERRS.push(String((e && e.message) || e));
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    ERRS.push('promise:' + String((e && e.reason) || e));
+  });
   if (!Lm) {
     var bf = document.getElementById('bootFail');
     if (bf) bf.hidden = false;
@@ -21,8 +28,8 @@
   var PASSIVE_MS = 30000; // 코인 자동 회복 주기
   var PASSIVE_MAX = 10; // 코인이 이 값보다 적을 때만 회복
   var DROP_VALUE = 2;
-  var DROP_MAX = 4;
-  var DROP_SPAWN_MS = 5500;
+  var DROP_MAX = 3;
+  var DROP_SPAWN_MS = 8000;
   var DROP_LIFE_MS = 150000;
   var DROP_PICK_M = 30;
   var DROP_SPAWN_MAX_M = 170;
@@ -381,13 +388,20 @@
     map.getPanes().overlayPane.appendChild(fxcanvas);
 
     playerMarker = Lm.marker(S.player, {
-      icon: makeBallIcon(64),
+      icon: makeBallIcon(56),
       interactive: false,
       keyboard: false,
       zIndexOffset: 600
     }).addTo(map);
 
     map.on('move zoomend resize moveend viewreset', onMapMove);
+    map.on('moveend', function () {
+      // 확대/이동이 끝나면 항상 원래 상태로 복구
+      suppress = false;
+      if (gcanvas) gcanvas.style.opacity = '1';
+      if (fxcanvas) fxcanvas.style.opacity = '1';
+      requestDraw();
+    });
     map.on('zoomanim', function (e) {
       suppress = true;
       zoomCanvas(gcanvas, e);
@@ -578,7 +592,7 @@
 
     var v = computeView();
     if (DBG) {
-      DBG.view = v;
+      DBG.lastView = v;
       DBG.size = [W, H];
       DBG.lastDraw = Date.now();
       dbgShow({
@@ -593,7 +607,7 @@
     var cw = v.cw;
     var chAbs = -v.ch;
     var showGrid = cw >= 17 && v.count <= MAX_GRID_CELLS;
-    var showRange = cw >= 10;
+    var showRange = cw >= 10 && v.count <= 12000;
     if (DBG) {
       DBG.showGrid = showGrid;
       DBG.showRange = showRange;
@@ -656,19 +670,24 @@
       }
     }
 
-    // 3) 점령한 칸
+    // 3) 점령한 칸 (저장된 칸만 순회 → 넓게 봐도 빠름)
     var anyCap = false;
+    var badges = [];
     gctx.beginPath();
-    for (iy = v.dyFrom; iy <= v.dyTo; iy++) {
-      for (ix = v.dxFrom; ix <= v.dxTo; ix++) {
-        if (!S.cells[ix + '_' + iy]) continue;
-        dx = ix - v.cx;
-        dy = iy - v.cy;
-        left = v.base.x + dx * cw;
-        top = v.base.y + (dy + 1) * v.ch;
-        gctx.rect(left + 0.8, top + 0.8, cw - 1.6, chAbs - 1.6);
-        anyCap = true;
-      }
+    for (var ck in S.cells) {
+      if (!Object.prototype.hasOwnProperty.call(S.cells, ck)) continue;
+      var sp = ck.split('_');
+      ix = parseInt(sp[0], 10);
+      iy = parseInt(sp[1], 10);
+      if (!isFinite(ix) || !isFinite(iy)) continue;
+      if (ix < v.dxFrom || ix > v.dxTo || iy < v.dyFrom || iy > v.dyTo) continue;
+      dx = ix - v.cx;
+      dy = iy - v.cy;
+      left = v.base.x + dx * cw;
+      top = v.base.y + (dy + 1) * v.ch;
+      gctx.rect(left + 0.8, top + 0.8, cw - 1.6, chAbs - 1.6);
+      anyCap = true;
+      if (cw >= 26) badges.push(left, top);
     }
     if (anyCap) {
       gctx.fillStyle = hexA(C.main, 0.62);
@@ -677,21 +696,16 @@
       gctx.strokeStyle = hexA(C.dark, 0.9);
       gctx.stroke();
 
-      if (cw >= 26) {
+      if (badges.length) {
         var bs = Math.min(cw * 0.26, 9);
         gctx.beginPath();
-        for (iy = v.dyFrom; iy <= v.dyTo; iy++) {
-          for (ix = v.dxFrom; ix <= v.dxTo; ix++) {
-            if (!S.cells[ix + '_' + iy]) continue;
-            dx = ix - v.cx;
-            dy = iy - v.cy;
-            left = v.base.x + dx * cw;
-            top = v.base.y + (dy + 1) * v.ch;
-            gctx.moveTo(left + 2.4, top + 2.4 + bs);
-            gctx.lineTo(left + 2.4 + bs, top + 2.4);
-            gctx.lineTo(left + 2.4, top + 2.4);
-            gctx.closePath();
-          }
+        for (i = 0; i < badges.length; i += 2) {
+          left = badges[i];
+          top = badges[i + 1];
+          gctx.moveTo(left + 2.4, top + 2.4 + bs);
+          gctx.lineTo(left + 2.4 + bs, top + 2.4);
+          gctx.lineTo(left + 2.4, top + 2.4);
+          gctx.closePath();
         }
         gctx.fillStyle = hexA(C.alt, 0.85);
         gctx.fill();
@@ -1152,7 +1166,7 @@
     save();
     updateNation();
     renderCharGrid();
-    if (playerMarker) playerMarker.setIcon(makeBallIcon(64));
+    if (playerMarker) playerMarker.setIcon(makeBallIcon(56));
     requestDraw();
     hideSheet('charSheet');
     toast(country().name + ' 볼로 점령해요!', 1600);
@@ -1340,6 +1354,9 @@
         },
         canvas: function () {
           return gcanvas;
+        },
+        errors: function () {
+          return ERRS.slice();
         }
       };
     }

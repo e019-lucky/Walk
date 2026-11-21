@@ -226,9 +226,14 @@ button {
 }
 
 .coinmeter-label {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(9, 14, 24, 0.6);
+  border: 1px solid rgba(160, 190, 230, 0.16);
   font-size: 9.5px;
-  color: #dbe6f5;
-  text-shadow: 0 1px 3px rgba(4, 8, 16, 0.7);
+  color: #e3ecf9;
   white-space: nowrap;
 }
 
